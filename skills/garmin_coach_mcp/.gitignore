@@ -1,0 +1,30 @@
+# Environments & Secrets
+.env
+*.env
+secrets/
+.config/
+/Users/nattawutdejkajonwuth/.config/garmin-coach/
+
+# Python virtual environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Database fallback & logs
+local_db.json
+*.log
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Scratch and test scratch files
+scratch_*.py
+scratch/
+

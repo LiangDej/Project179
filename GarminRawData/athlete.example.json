@@ -1,0 +1,77 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH — copy this file to athlete.json and fill in your values. config.py reads athlete.json on import and derives paces/zones. Never edit config.py directly.",
+  "_setup": "1) cp athlete.example.json athlete.json  2) Fill in your VDOT (from a recent race) and LTHR (from a Friel field test)  3) Run: .venv/bin/python3.13 ../tests/test_suite.py",
+
+  "vdot": 40,
+  "_vdot_help": "Use a recent race result at vdoto2.com. Update after every race or TT — never from training pace alone.",
+  "lthr": 183,
+  "_lthr_help": "Lactate Threshold Heart Rate. Run a Friel 30-min TT; avg HR of last 20 min ≈ LTHR. Must equal rhr + int(hrr * hr_zone_hrr_pct.T) for zones to be consistent.",
+  "rhr": 44,
+  "_rhr_help": "Resting HR (morning, before getting up). Check Garmin app 7-day avg.",
+  "mhr": 195,
+  "_mhr_help": "Max HR. Use peak HR from a hard interval session or hill sprint.",
+  "weight_kg": 70.0,
+
+  "vdot_source": "race_or_tt",
+  "vdot_calibration_date": "YYYY-MM-DD",
+  "vdot_calibration": "race",
+  "lthr_date": "YYYY-MM-DD",
+  "lthr_confidence": "MODERATE",
+  "tt_scheduled": null,
+
+  "_zones_note": "HR zones are derived automatically by config.py from lthr/rhr/mhr above. Do not edit hr_zone_hrr_pct unless you know what you are doing.",
+  "hr_zone_hrr_pct": { "E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95 },
+
+  "_paces_note": "Paces (sec/km) derived from VDOT 40 Jack Daniels table. Update after changing vdot — or let config.py recompute automatically if your version supports it.",
+  "vdot_paces_sec": {
+    "_help": "Jack Daniels VDOT 40 paces. Replace with values from your VDOT at vdoto2.com.",
+    "E": [337, 404],
+    "M": [316, 325],
+    "T": [300, 310],
+    "I": [271, 280],
+    "R": [260, 270]
+  },
+
+  "nutrition_products": {
+    "_comment": "Na content of your electrolyte products in mg per unit.",
+    "prevo_na_mg": 650,
+    "aminovital_na_mg": 90
+  },
+
+  "quality_nutrition": {
+    "_comment": "Pre-run protocol for quality sessions (T/I/R, 60-80 min). Edit to match your products.",
+    "pre_60min": "Carb source 20g (e.g. Palatinose, banana)",
+    "pre_15min": "Electrolyte cap (e.g. 1× Precision Hydration 500)"
+  },
+
+  "race_day_nutrition": {
+    "_comment": "Race morning pre-race protocol. Adjust timing and products to your stomach.",
+    "pre_150min": "Carb source 25g",
+    "pre_30min": "Gel + electrolyte cap x2",
+    "in_race": "Per km plan from nutrition_calculator"
+  },
+
+  "long_run_nutrition": {
+    "_comment": "Split protocol for treadmill vs outdoor. Update sweat_rate_L_hr from a weigh-in test (pre/post weight + fluid consumed).",
+    "treadmill": {
+      "env": "Your gym temp/humidity",
+      "sweat_rate_L_hr": 1.0,
+      "pre_60min": "Carb source 30g",
+      "pre_15min": "Electrolyte cap",
+      "in_run_45min": "Gel",
+      "in_run_90min": "Gel",
+      "total_na_mg": 0,
+      "acsm_pct": 0
+    },
+    "outdoor": {
+      "env": "Your race city morning temp/humidity",
+      "sweat_rate_L_hr": 1.4,
+      "pre_60min": "Carb source 30g",
+      "pre_15min": "Electrolyte cap",
+      "in_run_45min": "Electrolyte cap + Gel",
+      "in_run_90min": "Electrolyte cap + Gel",
+      "total_na_mg": 0,
+      "acsm_pct": 0
+    }
+  }
+}

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>PROJECT 179 — System Flow v2</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    padding: 20px 24px;
+  }
+  h1 { text-align:center; font-size:20px; font-weight:700; color:#58a6ff; margin-bottom:4px; }
+  .sub { text-align:center; font-size:12px; color:#8b949e; margin-bottom:18px; }
+  .wrap { background:#161b22; border-radius:14px; border:1px solid #30363d; padding:24px; overflow:auto; }
+  .mermaid { display:flex; justify-content:center; }
+  .legend { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-top:16px; }
+  .li { display:flex; align-items:center; gap:6px; font-size:11px; color:#8b949e; }
+  .dot { width:11px; height:11px; border-radius:3px; flex-shrink:0; }
+  .tag { display:inline-block; font-size:10px; padding:2px 7px; border-radius:10px; margin:2px; }
+</style>
+</head>
+<body>
+
+<h1>🏃 PROJECT 179 — System Flow v2</h1>
+<p class="sub">Updated · vdot_estimator: quality-lap pace from sessions_master (GPS) · TM sessions use belt_speed · Ely heat correction</p>
+
+<div class="wrap">
+<div class="mermaid">
+flowchart LR
+
+  %% ── EXTERNAL ──────────────────────
+  WATCH["⌚ Garmin Watch"]:::ext
+  API["☁️ Garmin Connect API"]:::ext
+
+  %% ── CACHES ────────────────────────
+  HC["💾 health_cache\nBB·HRV·Sleep·RHR\n2h TTL"]:::cache
+  LC["💾 lap_cache\nLap Detail\n7d TTL"]:::cache
+
+  %% ── RAW DATA ──────────────────────
+  RAW["📦 running_activities_all.json\n🔴 Raw — Never Modified"]:::raw
+
+  %% ── CONFIG ────────────────────────
+  CONFIG["⚙️ config.py\nVDOT 38 · HR Zones\nPaces · Phases\n🔴 Protected"]:::config
+
+  %% ── SHARED MODULES (NEW) ──────────
+  subgraph SHARED["📐 Shared Modules"]
+    direction TB
+    VDOTMATH["vdot_math.py\nJD Formula\ncompute_vdot()\npredict_race_time()"]:::shared
+    TMMODEL["treadmill_pace_model.py\nTM HR Anchors\ninfer_pace_from_hr()"]:::shared
+  end
+
+  %% ── DATA FILES ────────────────────
+  SMASTER["📋 sessions_master.json\nSource of Truth\nis_treadmill · treadmill_phases\nquality_hr_avg · laps\nquality laps pace (GPS)"]:::master
+  SESSIONS["📊 sessions.json\nQuality Sessions\npace (TM-corrected) · avg_hr"]:::sessions
+  SKILL["📝 garmin-coach-analyzer.md\nSkill File · Claude Context"]:::skill
+
+  %% ── ENTRY POINT ───────────────────
+  ENTRY["🔍 run_post_run.sh\n(Universal — ใช้อันเดียว)\ndetect_session.py\nauto-routes →"]:::entry
+
+  %% ── BASH SCRIPTS ──────────────────
+  subgraph SCRIPTS["🟡 Bash Scripts"]
+    direction TB
+    MORNING["🌅 run_morning.sh\nทุกเช้า"]:::bash
+    EASY["🟢 run_post_easy.sh\nEasy <14km"]:::bash
+    LONG["🟡 run_post_long.sh\nLong ≥14km"]:::bash
+    QUAL["🔥 run_post_quality.sh\nT / I / R"]:::bash
+    RACE["🏁 run_post_race.sh\nหลังแข่งจริง"]:::bash
+  end
+
+  %% ── MORNING PIPELINE ──────────────
+  subgraph MP["☀️ Morning"]
+    direction TB
+    DB["daily_brief.py"]:::tool
+    TL["training_load.py\nCTL·ATL·TSB (200d)"]:::tool
+    IR["injury_risk_detector.py"]:::tool
+    TAP["taper_monitor.py\nBB forecast"]:::tool
+    SP["session_prescriber.py\nWorkout ตาม Phase"]:::tool
+  end
+
+  %% ── POST EASY ─────────────────────
+  PSA_E["post_session_analyzer.py"]:::tool
+
+  %% ── POST LONG ─────────────────────
+  subgraph LP["🟡 Long Pipeline"]
+    direction TB
+    PSA_L["post_session_analyzer.py\n--update-log"]:::tool
+    TMP_L["tm_patch.py\nbelt_speed > HR-inferred"]:::tool
+    EES["energy_efficiency_scorer.py\nStamina·BB·Nutrition"]:::tool
+    SS_L["skill_sync.py"]:::tool
+  end
+
+  %% ── POST QUALITY ──────────────────
+  subgraph QP["🔥 Quality Pipeline"]
+    direction TB
+    PSA_Q["post_session_analyzer.py\n--update-log"]:::tool
+    TMP_Q["tm_patch.py\nbelt_speed > HR-inferred"]:::tool
+    VE["vdot_estimator.py\nBreakthrough · Trend"]:::tool
+    SS_Q["skill_sync.py"]:::tool
+  end
+
+  %% ── POST RACE ─────────────────────
+  subgraph RP["🏁 Race Pipeline"]
+    direction TB
+    PRU["post_race_updater.py\nVDOT → config.py"]:::tool
+    PSA_R["post_session_analyzer.py\n--update-log"]:::tool
+    VE_R["vdot_estimator.py"]:::tool
+    SS_R["skill_sync.py"]:::tool
+  end
+
+  %% ── GARMIN WORKOUT PUSHER ──────────
+  GWP["📤 garmin_workout_pusher.py\nsession_prescriber → Garmin JSON\nupload + schedule workouts"]:::tool
+
+  SP -->|weekly plan JSON| GWP
+  GWP -->|upload_running_workout| API
+  GWP -->|schedule_workout| API
+
+  %% ── ANALYSIS ──────────────────────
+  subgraph AN["🔵 Analysis"]
+    direction TB
+    RP2["race_predictor.py"]:::analysis
+    RPP["race_pace_planner.py\nSegments · Heat-adj"]:::analysis
+    WLR["weekly_load_report.py\ncache-first BB"]:::analysis
+    WA["weather_adjuster.py\nWBGT · Ely penalty\nadjusted pace+HR"]:::analysis
+    HRV["hrv_trend.py\nHRV baseline\novertraining warn"]:::analysis
+    SLC["sleep_correlator.py\nsleep→HR drift\nPearson r"]:::analysis
+    TP["training_planner.py\nSeason blocks\nfrom race date"]:::analysis
+    NC["nutrition_calculator.py\nSweat rate→Na loss\nPrevo caps/station\n(ACSM 2016)"]:::analysis
+  end
+
+  %% ── OUTPUTS ───────────────────────
+  subgraph OUT["✅ Outputs"]
+    direction TB
+    O1["📱 Daily Brief\nTSB · Plan · Nutrition"]:::output
+    O2["📏 Race Plan\nSeg paces · Prevo"]:::output
+    O3["🔬 VDOT Estimate\n(training only)"]:::output
+    O4["✅ Official VDOT\n(race-confirmed)"]:::output
+  end
+
+  %% ── CONNECTIONS ───────────────────
+  WATCH -->|sync| API
+  API -->|garmin_client.py| RAW
+  API --> HC
+  API --> LC
+
+  %% Entry → routes
+  ENTRY -->|easy| EASY
+  ENTRY -->|long| LONG
+  ENTRY -->|quality| QUAL
+
+  %% Morning
+  MORNING --> MP
+  HC --> DB
+  RAW --> TL
+  CONFIG --> DB & SP & TL
+  DB --> O1
+
+  %% Easy
+  RAW --> PSA_E
+  LC --> PSA_E
+  EASY --> PSA_E
+  PSA_E --> SMASTER
+
+  %% Long
+  LONG --> LP
+  RAW & LC --> PSA_L
+  PSA_L --> SESSIONS & SMASTER
+  SMASTER -->|treadmill_phases| TMP_L
+  SESSIONS --> TMP_L
+  TMP_L -->|corrected pace| SESSIONS
+  SESSIONS --> EES
+  HC --> EES
+  EES --> SS_L --> SKILL
+  TMMODEL -.->|infer_pace_from_hr| TMP_L
+
+  %% Quality
+  QUAL --> QP
+  RAW & LC --> PSA_Q
+  PSA_Q --> SESSIONS & SMASTER
+  SMASTER -->|treadmill_phases| TMP_Q
+  SESSIONS --> TMP_Q
+  TMP_Q -->|corrected pace| SESSIONS
+  SESSIONS --> VE --> O3
+  SMASTER -->|quality laps pace| VE
+  VE --> SS_Q --> SKILL
+  TMMODEL -.->|infer_pace_from_hr| TMP_Q
+
+  %% Race
+  RACE --> RP
+  PRU -->|apply| CONFIG --> O4
+  RAW & LC --> PSA_R
+  PSA_R --> SESSIONS
+  VE_R --> SS_R --> SKILL
+
+  %% Analysis
+  SESSIONS --> RP2 --> O3
+  SMASTER -->|quality_hr_avg| RP2
+  CONFIG --> RPP --> O2
+  RAW --> WLR
+  HC -->|cache-first| WLR
+  CONFIG -.->|VDOT paces| WA
+  RPP -.->|base pace| WA
+  HC --> HRV
+  HC --> SLC
+  RAW --> SLC
+  CONFIG -.->|phases| TP
+  HC -.->|temp/humidity| NC
+  WA -.->|conditions| NC
+
+  %% Shared modules
+  VDOTMATH -.->|compute_vdot| RP2
+  VDOTMATH -.->|compute_vdot| VE
+  VDOTMATH -.->|compute_vdot| VE_R
+  VDOTMATH -.->|compute_vdot| PRU
+
+  %% Styles
+  classDef ext      fill:#1f3a5f,stroke:#58a6ff,color:#cae4ff
+  classDef cache    fill:#1f2d1f,stroke:#3fb950,color:#9be9a8
+  classDef raw      fill:#2d1f1f,stroke:#f85149,color:#ffa198
+  classDef config   fill:#3d2b00,stroke:#e3b341,color:#f0c040
+  classDef shared   fill:#2b2040,stroke:#bc8cff,color:#e0c8ff
+  classDef master   fill:#25183d,stroke:#bc8cff,color:#d2a8ff
+  classDef sessions fill:#1a2535,stroke:#388bfd,color:#79c0ff
+  classDef skill    fill:#1a2d1a,stroke:#56d364,color:#acf2bd
+  classDef entry    fill:#3d2200,stroke:#f0a500,color:#ffd166,rx:20
+  classDef bash     fill:#2d2200,stroke:#e3b341,color:#ffd166
+  classDef tool     fill:#1c2128,stroke:#484f58,color:#c9d1d9
+  classDef analysis fill:#1a1f30,stroke:#6e7681,color:#8b949e
+  classDef output   fill:#0d2010,stroke:#3fb950,color:#56d364
+
+  style SHARED  fill:#1a1530,stroke:#bc8cff,color:#bc8cff
+  style SCRIPTS fill:#1e1a00,stroke:#e3b341,color:#e3b341
+  style MP      fill:#121e12,stroke:#3fb950,color:#3fb950
+  style LP      fill:#1e1a00,stroke:#e3b341,color:#e3b341
+  style QP      fill:#1e1212,stroke:#f85149,color:#f85149
+  style RP      fill:#1a1230,stroke:#bc8cff,color:#bc8cff
+  style AN      fill:#12121e,stroke:#388bfd,color:#388bfd
+  style OUT     fill:#0d1e0d,stroke:#56d364,color:#56d364
+</div>
+</div>
+
+<div class="legend">
+  <div class="li"><div class="dot" style="background:#58a6ff"></div>External</div>
+  <div class="li"><div class="dot" style="background:#f85149"></div>Raw (ห้ามแก้)</div>
+  <div class="li"><div class="dot" style="background:#e3b341"></div>Bash Trigger</div>
+  <div class="li"><div class="dot" style="background:#f0a500"></div>Universal Entry</div>
+  <div class="li"><div class="dot" style="background:#bc8cff"></div>Shared Module / sessions_master</div>
+  <div class="li"><div class="dot" style="background:#388bfd"></div>sessions.json</div>
+  <div class="li"><div class="dot" style="background:#56d364"></div>Output / Skill</div>
+  <div class="li" style="color:#6e7681">- - → shared import</div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    flowchart: { curve: 'basis', rankSpacing: 50, nodeSpacing: 30, padding: 14 },
+    themeVariables: { darkMode:true, background:'#161b22', lineColor:'#58a6ff', fontSize:'11.5px' }
+  });
+</script>
+</body>
+</html>

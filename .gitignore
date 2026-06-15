@@ -1,0 +1,55 @@
+# Credentials — absolute ban
+.env
+*.env
+.env.*
+credentials.json
+token.json
+
+# Python environments (platform-specific, never commit)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+.venv-linux/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+Icon?
+._*
+Thumbs.db
+
+# Large Garmin activity dump (regenerated from Garmin Connect, not source of truth)
+GarminRawData/running_activities_all.json
+GarminRawData/running_activities_all.json.sha256
+
+# Garmin health/lap cache (lives in ~/.config/garmin-coach/ but just in case)
+health_cache/
+lap_cache/
+
+# Per-activity session cache (regenerated from Garmin, not source of truth)
+GarminRawData/SessionCache/
+
+# Personal athlete data — copy *.example.json → *.json and fill in your values
+GarminRawData/athlete.json
+GarminRawData/races.json
+
+# Personal training logs (generated locally, never committed)
+GarminRawData/QualitySessionLog/
+GarminRawData/QualityDetails/
+GarminRawData/RaceHistory/
+GarminRawData/coaching_log.md
+
+# Claude Code session data (local tooling, not project source)
+.claude/
+
+# garmin_coach_mcp has its own local git repo — track only the two needed files
+# (config.py and db_helper.py are added explicitly above)
+skills/garmin_coach_mcp/__pycache__/
