@@ -1,0 +1,58 @@
+name: Project 179 CI
+
+# Gate 1 (Version Control) + Gate 2 (Static/Unit/Consistency/Functional)
+# Runs automatically on every push/PR to main.
+# test_suite.py = 30 checks (UNIT + CONSISTENCY + FUNCTIONAL)
+# Exit 0 = green; any fail → PR is blocked.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-suite:
+    name: "Test Suite (30 checks)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      # Create venv at .venv so PYBIN in test_suite.py resolves correctly:
+      #   PYBIN = ROOT / ".venv" / "bin" / "python3.13"
+      - name: Create venv + install dependencies
+        run: |
+          python3.13 -m venv .venv
+          .venv/bin/pip install --upgrade pip --quiet
+          .venv/bin/pip install -r requirements.txt --quiet
+
+      # athlete.json and races.json are gitignored (personal data).
+      # CI uses the example files as test fixtures.
+      - name: Setup CI fixtures (copy examples if real files absent)
+        run: |
+          [ -f GarminRawData/athlete.json ] || cp GarminRawData/athlete.example.json GarminRawData/athlete.json
+          [ -f GarminRawData/races.json ]   || cp GarminRawData/races.example.json   GarminRawData/races.json
+
+      - name: Run test suite
+        env:
+          PYTHONPATH: "skills/garmin_coach_mcp:GarminRawData/tools"
+        run: |
+          .venv/bin/python3.13 GarminRawData/tests/test_suite.py
+
+      # Optional: upload test output on failure for debugging
+      - name: Upload failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failure-log
+          path: /tmp/p179-test-*.log
+          if-no-files-found: ignore
