@@ -97,6 +97,26 @@ def unit_tests():
     check("bangkok_climate: all temps 22-32°C", all(22 <= t <= 32 for t in temps), f"{temps}")
     check("bangkok_climate: Ely penalty 0 at ≤13°C", bc.ely_penalty_fraction(13) == 0)
 
+    # training_planner — dynamic peak/taper math (pure functions, synthetic inputs
+    # so this doesn't depend on live running_activities_all.json data changing).
+    import training_planner as tp
+    check("training_planner: target_peak_km stretches above historical peak",
+          tp._target_peak_km(current_weekly_km=40, historical_peak_km=50) == 55,
+          f"got {tp._target_peak_km(40, 50)}, expected 55 (50*1.13→55)")
+    check("training_planner: target_peak_km never below current+5 (mid-buildup athlete)",
+          tp._target_peak_km(current_weekly_km=68, historical_peak_km=50) >= 73,
+          f"got {tp._target_peak_km(68, 50)}, expected >=73")
+    check("training_planner: taper_km strictly decreasing toward race day",
+          all(a > b for a, b in zip([tp._taper_km(w, 70) for w in [4,3,2,1,0]][:-1],
+                                      [tp._taper_km(w, 70) for w in [4,3,2,1,0]][1:])),
+          f"{[tp._taper_km(w, 70) for w in [4,3,2,1,0]]}")
+    check("training_planner: taper_km race day == 0",
+          tp._taper_km(0, 70) == 0)
+    phase_km = tp._build_phase_km(45, 70)
+    check("training_planner: phase_km progression base < quality < race_specific",
+          phase_km["base"]["max"] < phase_km["quality"]["max"] < phase_km["race_specific"]["max"],
+          f"{phase_km}")
+
 
 # ===========================================================================
 # 2. CONSISTENCY TESTS — single-source invariants (regression bugs)

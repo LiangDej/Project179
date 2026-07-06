@@ -28,13 +28,34 @@ TOOLS_DIR    = Path(__file__).parent
 COACH_MCP    = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
 QUALITY_LOG  = BASE_DIR / "QualitySessionLog" / "sessions.json"
 MASTER_JSON  = BASE_DIR / "QualitySessionLog" / "sessions_master.json"
-HEALTH_CACHE = Path.home() / ".config" / "garmin-coach" / "health_cache"
+HEALTH_CACHE = BASE_DIR / "wellness"
 
 LONG_RUN_KM      = 14.0   # minimum km to qualify as Long Run
 LONG_RUN_TYPES   = {"Easy Run", "Marathon Pace", "long", "long_run", "easy", "Easy"}
 # Exclude quality sessions from Long Run detection (sessions_master uses these types)
 QUALITY_TYPES    = {"Threshold (T)", "Interval (I)", "Tempo", "Fast Finish",
                     "threshold", "interval", "tempo"}
+
+ACTIVITIES_JSON  = BASE_DIR / "running_activities_all.json"
+
+
+def _load_activities_index() -> dict[int, dict]:
+    """Load running_activities_all.json indexed by activityId for pace fallback."""
+    if not ACTIVITIES_JSON.exists():
+        return {}
+    try:
+        acts = json.loads(ACTIVITIES_JSON.read_text())
+        return {int(a["activityId"]): a for a in acts if a.get("activityId")}
+    except Exception:
+        return {}
+
+
+def _pace_from_speed(speed_ms: float | None) -> str | None:
+    """Convert m/s → 'M:SS/km' string, or None if invalid."""
+    if not speed_ms or speed_ms <= 0:
+        return None
+    secs = 1000 / speed_ms
+    return f"{int(secs // 60)}:{int(secs % 60):02d}/km"
 
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
@@ -91,7 +112,7 @@ def _load_sessions(max_sessions: int) -> list[dict]:
 
 def _get_bb_for_date(date_str: str) -> tuple[int | None, int | None]:
     """คืน (bb_before, bb_after) จาก health cache"""
-    path = HEALTH_CACHE / f"health_{date_str}.json"
+    path = HEALTH_CACHE / f"wellness_{date_str}.json"
     if not path.exists():
         return None, None
     try:
@@ -135,6 +156,8 @@ def analyze(max_sessions: int) -> dict:
             )
         }
 
+    activities_idx = _load_activities_index()
+
     scored = []
     for s in sessions:
         date_str = s.get("date", "")[:10]
@@ -152,10 +175,17 @@ def analyze(max_sessions: int) -> dict:
 
         eff = _efficiency_score(stamina, bb_drop)
 
+        # pace: prefer stored value, fallback to running_activities_all.json via averageSpeed
+        avg_pace = s.get("avg_pace")
+        if avg_pace is None:
+            aid = s.get("activity_id")
+            if aid and int(aid) in activities_idx:
+                avg_pace = _pace_from_speed(activities_idx[int(aid)].get("averageSpeed"))
+
         scored.append({
             "date":             date_str,
             "distance_km":      dist,
-            "avg_pace":         s.get("avg_pace"),
+            "avg_pace":         avg_pace,
             "avg_hr":           s.get("avg_hr"),
             "stamina_drain_pct": stamina,
             "bb_start":         bb_high,

@@ -12,6 +12,13 @@
   "_mhr_help": "Max HR. Use peak HR from a hard interval session or hill sprint.",
   "weight_kg": 70.0,
 
+  "training_days_per_week": 5,
+  "_training_days_help": "How many days/week you actually RUN (not counting a separate strength day). Used by training_planner.py to size session distribution — fewer days compress to 1 quality day, more days keep 2 quality + easy spread.",
+  "rest_days": ["friday"],
+  "_rest_days_help": "Lowercase day names with ZERO training (no run, no strength). training_planner.py marks these REST.",
+  "strength_day": "monday",
+  "_strength_day_help": "Lowercase day name for strength/conditioning (non-running, not a rest day). Omit if you don't lift.",
+
   "vdot_source": "race_or_tt",
   "vdot_calibration_date": "YYYY-MM-DD",
   "vdot_calibration": "race",
