@@ -13,6 +13,12 @@ echo "════════════════════════�
 echo "🏃 POST EASY RUN — $(date '+%Y-%m-%d %H:%M')"
 echo "════════════════════════════════════════"
 
+# ── Step 0: Sync latest activities → running_activities_all.json ───────────
+echo ""
+echo "▶ Step 0 — Sync Activities + Wellness"
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_incremental.py" --lookback-days 3
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_wellness.py"
+
 # ── Post-session analysis → sessions_master.json ───────────────────────────
 echo ""
 if [ -n "${1:-}" ]; then
@@ -31,6 +37,11 @@ if [ -n "${1:-}" ]; then
 else
   "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py
 fi
+
+# ── Recalculate Energy Efficiency Score ────────────────────────────────────
+echo ""
+echo "▶ Energy Efficiency Score"
+"$(bash "$TOOLS_DIR/get_python.sh")" energy_efficiency_scorer.py
 
 echo ""
 echo "════════════════════════════════════════"
