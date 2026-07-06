@@ -65,6 +65,34 @@ The agent will ask questions one by one → write your files → run the test su
 
 ## After Setup — just talk to your agent
 
+No commands to memorize, no flags to type — talk to the agent in plain language like you would a real coach. For example:
+
+- "Give me my morning summary"
+- "How did my run just now go?"
+- "How many km have I run this week?"
+
+The agent picks the right tool, pulls your Garmin data, and answers with real numbers and coaching advice — see [Tool Reference](#tool-reference) below for more example phrases.
+
+**Not sure what to say first?** Try these three:
+1. **"Give me my morning summary"** → body status + what to run today
+2. **"Analyze my run just now"** → after every run
+3. **"How many km have I run this week?"** → check you're on track with your plan
+
+---
+
+## Background Concepts (1 minute read before continuing)
+
+The tool list below uses a lot of technical terms — knowing these 4 first makes everything much easier to follow:
+
+| Term | Plain-language meaning |
+|---|---|
+| **VDOT** | A single number for "how fit are you" — higher means you can run faster/farther. Only confirmed from an actual race result or Time Trial (never guessed from how you feel) |
+| **Training Zones (E/M/T/I/R)** | 5 levels of running intensity, from Easy (conversational pace) to Repetition (fastest) — calculated from your VDOT |
+| **CTL / ATL / TSB** | "Long-term fitness" / "recent fatigue" / "freshness" — used to decide whether today should be a hard day or a rest day |
+| **Body Battery** | A Garmin-specific term — your remaining daily energy reserve (0-100), similar to a phone's battery percentage |
+
+No need to memorize these — the agent explains them every time it uses them. Just knowing roughly what they mean is enough.
+
 ---
 
 ## Tool Reference
@@ -363,3 +391,13 @@ CI runs automatically on every push and pull request via GitHub Actions.
 - **ACWR via EWMA** — injury risk from ATL/CTL ratio
 - **ACSM Sawka 2007** — sweat-rate calibrated Na replacement
 - Paces and zones update automatically when `athlete.json` changes — no code edits needed
+
+---
+
+## ⚠️ Disclaimer
+
+This project is a **training-planning tool** based on established sports-science principles (Jack Daniels, ACSM, EWMA) — it is **not medical advice**.
+
+- If you experience pain, injury, or anything abnormal during training, stop and consult a doctor or physiotherapist before continuing.
+- VDOT/HR zone numbers should be confirmed with an actual race or Time Trial result — don't make health decisions based on estimated values alone.
+- You are solely responsible for your own training and racing decisions.
