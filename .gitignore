@@ -47,6 +47,25 @@ GarminRawData/QualityDetails/
 GarminRawData/RaceHistory/
 GarminRawData/coaching_log.md
 
+# Personal training plan — contains actual VDOT/CTL/race targets
+GarminRawData/MASTER_PLAN_2026.md
+
+# Personal daily wellness data (sleep/HRV/BB) — same sensitivity as athlete.json
+GarminRawData/wellness/
+
+# VME lab / customer infra project — separate from the running-coach project,
+# contains plaintext lab credentials and customer environment details.
+# Never belongs in this repo's history.
+GarminRawData/lab_envs.py
+GarminRawData/deploy_vm.py
+GarminRawData/VME-Training-Lab-Runbook.md
+GarminRawData/ha_failover_report_*.md
+
+# Unrelated personal projects living in this same working directory — never
+# part of the Garmin running-coach agent, must never be pushed with it.
+PalatinoseLab/
+skills/investment-coach.md
+
 # Claude Code session data (local tooling, not project source)
 .claude/
 
