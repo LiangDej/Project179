@@ -3,7 +3,6 @@
 *.env
 secrets/
 .config/
-/Users/nattawutdejkajonwuth/.config/garmin-coach/
 
 # Python virtual environment
 venv/

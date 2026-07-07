@@ -28,7 +28,7 @@ def _load_athlete_json() -> dict:
 _AJ = _load_athlete_json()
 
 ATHLETE = {
-    "name":       "Nattawut Dejkajonwuth",
+    "name":       _AJ.get("name", "Athlete"),
     "rhr":        _AJ.get("rhr", 44),
     "mhr":        _AJ.get("mhr", 195),
     "vdot":       _AJ.get("vdot", 40),     # race/TT confirmed ONLY (not Garmin VO2max)
