@@ -11,6 +11,12 @@ echo "════════════════════════�
 echo "🔥 POST QUALITY RUN — $(date '+%Y-%m-%d %H:%M')"
 echo "════════════════════════════════════════"
 
+# ── Step 0: Sync latest activities → running_activities_all.json ───────────
+echo ""
+echo "▶ Step 0/3 — Sync Activities + Wellness"
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_incremental.py" --lookback-days 3
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_wellness.py"
+
 # ── Step 1: Post-session analysis + log sessions.json ──────────────────────
 echo ""
 echo "▶ Step 1/3 — Post Session Analyzer"
@@ -36,13 +42,23 @@ echo "▶ Step 2/3 — VDOT Estimator"
 echo "────────────────────────────────────"
 "$(bash "$TOOLS_DIR/get_python.sh")" vdot_estimator.py
 
-# ── Step 3: Sync skill file ─────────────────────────────────────────────────
+# ── Step 3: Stamina patch ───────────────────────────────────────────────────
 echo ""
-echo "▶ Step 3/3 — Skill Sync"
+echo "▶ Step 3/4 — Stamina Patch"
+echo "────────────────────────────────────"
+if [ -n "${1:-}" ]; then
+  "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py --id "${1:-}"
+else
+  "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py
+fi
+
+# ── Step 4: Sync skill file ─────────────────────────────────────────────────
+echo ""
+echo "▶ Step 4/4 — Skill Sync"
 echo "────────────────────────────────────"
 "$(bash "$TOOLS_DIR/get_python.sh")" skill_sync.py
 
 echo ""
 echo "════════════════════════════════════════"
-echo "✅ Done — sessions.json + sessions_master.json + skill file updated"
+echo "✅ Done — sessions.json + sessions_master.json + stamina + skill file updated"
 echo "════════════════════════════════════════"

@@ -36,7 +36,7 @@ sys.path.insert(0, str(COACH_MCP))
 from config import ATHLETE  # noqa: E402
 
 ACTS_FILE  = BASE_DIR / "running_activities_all.json"
-CACHE_DIR  = Path.home() / ".config/garmin-coach/health_cache"
+CACHE_DIR  = Path(__file__).resolve().parent.parent / "wellness"
 
 RHR = ATHLETE["rhr"]
 MHR = ATHLETE["mhr"]
