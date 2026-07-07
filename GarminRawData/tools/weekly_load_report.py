@@ -31,7 +31,7 @@ from config import ATHLETE, ZONE_PCT, HR_ZONE_BOUNDS  # noqa: E402
 from training_load import calc_hr_tss  # noqa: E402  — single source of truth for TSS
 
 QUALITY_LOG  = BASE_DIR / "QualitySessionLog" / "sessions.json"
-HEALTH_CACHE = Path.home() / ".config" / "garmin-coach" / "health_cache"
+HEALTH_CACHE = BASE_DIR / "wellness"
 
 
 def load_activities():
@@ -132,11 +132,11 @@ def fetch_weekly_bb(client, start_date, end_date):
         d = _dt.strptime(start_date, "%Y-%m-%d").date()
         end = _dt.strptime(end_date, "%Y-%m-%d").date()
         while d <= end:
-            cache_file = HEALTH_CACHE / f"health_{d.isoformat()}.json"
+            cache_file = HEALTH_CACHE / f"wellness_{d.isoformat()}.json"
             if cache_file.exists():
                 try:
                     data = json.loads(cache_file.read_text())
-                    bb = data.get("body_battery") or data.get("bb_high")
+                    bb = data.get("bb_high") or data.get("body_battery")
                     if bb:
                         vals.append(int(bb))
                 except Exception:

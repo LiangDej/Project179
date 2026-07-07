@@ -58,9 +58,13 @@ _MAX_DELAY     = 60.0  # วินาที cap
 # Cached client (module-level singleton)
 _client = None
 
-# Health Data Cache
-HEALTH_CACHE_DIR = SESSION_DIR / "health_cache"
-HEALTH_CACHE_TTL = 2 * 3600  # 2 ชั่วโมง (วินาที)
+# Wellness master data (single source of truth — แทน health_cache เดิม)
+WELLNESS_DIR     = Path(__file__).resolve().parent.parent / "wellness"
+HEALTH_CACHE_TTL = 2 * 3600  # 2 ชั่วโมง (วินาที) — refresh "วันนี้" ถ้า snapshot เก่ากว่านี้
+
+# bb_morning = snapshot แรกในช่วง 04:00–10:00 เท่านั้น (กัน post-run snapshot ปลอมตัวเป็น morning)
+MORNING_HOUR_START = 4
+MORNING_HOUR_END   = 10
 
 
 # ---------------------------------------------------------------------------
@@ -237,32 +241,29 @@ def invalidate_session():
 
 
 # ---------------------------------------------------------------------------
-# Health Data Cache  (BB / HRV / RHR / Sleep)
+# Wellness Master Data  (BB / HRV / RHR / Sleep)
+#
+# SINGLE SOURCE OF TRUTH = GarminRawData/wellness/wellness_YYYY-MM-DD.json
+# โครงสร้าง: { date, snapshots:[...], + flat top-level superset สำหรับ tools }
+# health_cache เดิมถูกยกเลิก — ทุก tool อ่าน wellness master ตัวเดียว
 # ---------------------------------------------------------------------------
-def _health_cache_path(date_str: str) -> Path:
-    HEALTH_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return HEALTH_CACHE_DIR / f"health_{date_str}.json"
+_HEALTH_KEYS = (
+    "body_battery", "bb_high", "bb_low", "bb_morning", "hrv_status",
+    "resting_hr", "stress_avg", "sleep_score", "sleep_deep_min",
+    "sleep_rem_min", "sleep_light_min", "sleep_awake_min",
+    "respiratory_avg", "respiratory_low", "respiratory_high",
+    "spo2_avg", "spo2_low",
+)
 
 
-def _cache_is_fresh(path: Path) -> bool:
-    """True ถ้า cache file มีอายุน้อยกว่า TTL"""
-    if not path.exists():
-        return False
-    age = time.time() - path.stat().st_mtime
-    return age < HEALTH_CACHE_TTL
+def _wellness_path(date_str: str) -> Path:
+    WELLNESS_DIR.mkdir(parents=True, exist_ok=True)
+    return WELLNESS_DIR / f"wellness_{date_str}.json"
 
 
-def _save_health_cache(date_str: str, data: dict):
-    path = _health_cache_path(date_str)
-    # Atomic write — prevents corruption on crash mid-write
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-    os.replace(tmp, path)
-    logger.debug(f"💾 Health cache saved: {path.name}")
-
-
-def _load_health_cache(date_str: str) -> dict | None:
-    path = _health_cache_path(date_str)
+def _load_wellness_day(date_str: str) -> dict | None:
+    """อ่าน wellness master ดิบ (raw master dict) — None ถ้าไม่มีไฟล์"""
+    path = WELLNESS_DIR / f"wellness_{date_str}.json"
     if not path.exists():
         return None
     try:
@@ -271,130 +272,204 @@ def _load_health_cache(date_str: str) -> dict | None:
         return None
 
 
+def _save_wellness_day(date_str: str, data: dict):
+    path = _wellness_path(date_str)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    os.replace(tmp, path)
+    logger.debug(f"💾 Wellness master saved: {path.name}")
+
+
+def _flatten_wellness(master: dict) -> dict:
+    """แปลง wellness master → flat health dict (schema เดิมที่ tools คาดหวัง)"""
+    flat = {"date": master.get("date")}
+    for k in _HEALTH_KEYS:
+        flat[k] = master.get(k)
+    # ป้องกัน None ที่ tools เรียก .lower() — default "Unknown" เหมือนเดิม
+    if not flat.get("hrv_status"):
+        flat["hrv_status"] = "Unknown"
+    flat["_source"] = "wellness"
+    return flat
+
+
+def _extract_wellness_snapshot(client, date_str: str) -> dict:
+    """ดึง wellness 1 snapshot จาก Garmin API (get_stats + BB + HRV + Sleep)"""
+    snap = {
+        "snapshot_at": datetime.now().isoformat(),
+        "body_battery": None, "bb_high": None, "bb_low": None,
+        "hrv_status": None, "resting_hr": None, "stress_avg": None,
+        "sleep_score": None, "sleep_deep_min": None, "sleep_rem_min": None,
+        "sleep_light_min": None, "sleep_awake_min": None,
+        "respiratory_avg": None, "respiratory_low": None, "respiratory_high": None,
+        "spo2_avg": None, "spo2_low": None,
+    }
+
+    # Daily stats → resting HR / stress / BB high+low (authoritative nadir)
+    try:
+        stats = garmin_get(client.get_stats, date_str)
+        if stats:
+            snap["resting_hr"] = stats.get("restingHeartRate")
+            snap["stress_avg"] = stats.get("averageStressLevel")
+            snap["bb_high"]    = stats.get("bodyBatteryHighestValue")
+            snap["bb_low"]     = stats.get("bodyBatteryLowestValue")
+    except Exception as e:
+        logger.warning(f"stats fetch failed: {e}")
+
+    # Body Battery current (last value of day)
+    try:
+        bb_data = garmin_get(client.get_body_battery, date_str, date_str)
+        if bb_data and isinstance(bb_data, list):
+            for entry in bb_data:
+                vals = entry.get("bodyBatteryValuesArray", [])
+                if vals:
+                    snap["body_battery"] = vals[-1][1] if isinstance(vals[-1], list) else vals[-1]
+    except Exception as e:
+        logger.warning(f"BB fetch failed: {e}")
+
+    # HRV status
+    try:
+        hrv = garmin_get(client.get_hrv_data, date_str)
+        if hrv:
+            summary = hrv.get("hrvSummary", {})
+            snap["hrv_status"] = summary.get("status") or hrv.get("hrvStatus")
+    except Exception as e:
+        logger.warning(f"HRV fetch failed: {e}")
+
+    # Sleep score / stages / respiratory / spo2
+    try:
+        sleep = garmin_get(client.get_sleep_data, date_str)
+        if sleep:
+            dto = sleep.get("dailySleepDTO", {}) or {}
+            raw_score = dto.get("sleepScores", {}).get("overall") or dto.get("sleepScore")
+            snap["sleep_score"] = raw_score.get("value") if isinstance(raw_score, dict) else raw_score
+            if dto.get("deepSleepSeconds") is not None:
+                snap["sleep_deep_min"]  = round(dto["deepSleepSeconds"] / 60, 1)
+            if dto.get("remSleepSeconds") is not None:
+                snap["sleep_rem_min"]   = round(dto["remSleepSeconds"] / 60, 1)
+            if dto.get("lightSleepSeconds") is not None:
+                snap["sleep_light_min"] = round(dto["lightSleepSeconds"] / 60, 1)
+            if dto.get("awakeSleepSeconds") is not None:
+                snap["sleep_awake_min"] = round(dto["awakeSleepSeconds"] / 60, 1)
+            snap["respiratory_avg"]  = dto.get("averageRespirationValue")
+            snap["respiratory_low"]  = dto.get("lowestRespirationValue")
+            snap["respiratory_high"] = dto.get("highestRespirationValue")
+            snap["spo2_avg"]         = dto.get("averageSpO2Value")
+            snap["spo2_low"]         = dto.get("lowestSpO2Value")
+    except Exception as e:
+        logger.warning(f"Sleep fetch failed: {e}")
+
+    return snap
+
+
+def sync_wellness_day(client, date_str: str) -> dict:
+    """
+    Fetch 1 snapshot จาก Garmin → merge เข้า wellness master → เขียนไฟล์ → คืน master
+
+    - เก็บหลาย snapshot/วัน (morning, post-run) ใน snapshots[]
+    - upsert: snapshot ภายใน 10 นาที = overwrite, ไกลกว่านั้น = append
+    - bb_morning = snapshot แรกในช่วง 04:00–10:00 เท่านั้น
+    - flat top-level superset (latest snapshot) สำหรับ tools อ่านง่าย
+    """
+    master = _load_wellness_day(date_str) or {"date": date_str, "snapshots": []}
+    snap = _extract_wellness_snapshot(client, date_str)
+
+    snaps = master.get("snapshots", [])
+    now = datetime.fromisoformat(snap["snapshot_at"])
+    replaced = False
+    for i, s in enumerate(snaps):
+        try:
+            if abs((now - datetime.fromisoformat(s["snapshot_at"])).total_seconds()) < 600:
+                snaps[i] = snap
+                replaced = True
+                break
+        except Exception:
+            pass
+    if not replaced:
+        snaps.append(snap)
+    master["snapshots"] = snaps
+
+    # bb_morning — snapshot แรกในหน้าต่างเช้าเท่านั้น
+    morning_bb = None
+    for s in sorted(snaps, key=lambda x: x.get("snapshot_at", "")):
+        try:
+            h = datetime.fromisoformat(s["snapshot_at"]).hour
+            if MORNING_HOUR_START <= h < MORNING_HOUR_END:
+                morning_bb = s.get("body_battery")
+                break
+        except Exception:
+            pass
+
+    # flat top-level superset (จาก latest snapshot + computed)
+    latest = snaps[-1]
+    for k in _HEALTH_KEYS:
+        master[k] = latest.get(k)
+    master["bb_morning"]           = morning_bb
+    master["bb_morning_confirmed"] = morning_bb is not None
+    master["bb_latest"]            = latest.get("body_battery")
+    master["fetched_at"]           = snap["snapshot_at"]
+
+    _save_wellness_day(date_str, master)
+    return master
+
+
+def _load_health_cache(date_str: str) -> dict | None:
+    """
+    [compat] offline read — คืน flat health dict จาก wellness master (ไม่เรียก API)
+    คงชื่อเดิมไว้เพื่อ backward-compat กับ tools ที่ import (taper_monitor, session_prescriber, daily_brief --offline)
+    """
+    master = _load_wellness_day(date_str)
+    if not master:
+        return None
+    flat = _flatten_wellness(master)
+    flat["_source"] = "cache"
+    return flat
+
+
 def get_health_cached(client, date_str: str, force_refresh: bool = False) -> dict:
     """
-    ดึง BB / HRV / RHR / Sleep สำหรับวันที่กำหนด
-    — ใช้ cache ถ้ายังสด (TTL 2 ชั่วโมง) เพื่อลด API calls
-    — ถ้า API ไม่พร้อม (429/network error) ใช้ cache เก่าแทนโดยอัตโนมัติ
+    ดึง BB / HRV / RHR / Sleep — อ่านจาก wellness master (single source of truth)
 
-    Args:
-        client:        Garmin client จาก get_client()
-        date_str:      "YYYY-MM-DD"
-        force_refresh: True = bypass cache, เรียก API ใหม่เสมอ
+    - past date: trust master เสมอ (BB ของวันที่ผ่านไปแล้ว final)
+    - today: refresh จาก API ถ้า master ไม่มี หรือ snapshot ล่าสุดเก่ากว่า TTL (2h)
+    - API ไม่พร้อม: fallback master เก่า → skeleton
 
-    Returns:
-        dict ที่มี keys: date, body_battery, hrv_status, resting_hr,
-                         sleep_score, stress_avg, _source ("live" | "cache" | "unavailable")
+    Returns: flat dict (date, body_battery, bb_high, bb_low, hrv_status, ...)
     """
-    path = _health_cache_path(date_str)
+    path = _wellness_path(date_str)
+    is_today = date_str == datetime.now().strftime("%Y-%m-%d")
 
-    # ใช้ cache ถ้าสดพอและไม่ได้ force refresh
-    if not force_refresh and _cache_is_fresh(path):
-        data = _load_health_cache(date_str)
-        if data:
-            data["_source"] = "cache"
-            logger.debug(f"📦 Health cache HIT: {date_str}")
-            return data
+    stale = False
+    if path.exists():
+        stale = (time.time() - path.stat().st_mtime) > HEALTH_CACHE_TTL
 
-    # พยายามดึงจาก API
-    try:
-        summary = garmin_get(client.get_user_summary, date_str)
-        hrv_raw = None
+    need_refresh = force_refresh or (not path.exists()) or (is_today and stale)
+
+    if need_refresh:
         try:
-            hrv_raw = garmin_get(client.get_hrv_data, date_str)
+            master = sync_wellness_day(client, date_str)
+            flat = _flatten_wellness(master)
+            flat["_source"] = "live"
+            logger.info(f"✅ Wellness fetched live: {date_str}")
+            return flat
         except Exception as e:
-            logger.warning(f"HRV unavailable: {e}")
+            logger.warning(f"⚠️  API ไม่พร้อม ({e}) — ลอง fallback wellness master...")
 
-        sleep_raw = None
-        try:
-            sleep_raw = garmin_get(client.get_sleep_data, date_str)
-        except Exception as e:
-            logger.warning(f"Sleep data unavailable: {e}")
+    master = _load_wellness_day(date_str)
+    if master and master.get("snapshots"):
+        flat = _flatten_wellness(master)
+        flat["_source"] = "cache" if need_refresh else "wellness"
+        return flat
 
-        hrv_status = "Unknown"
-        if hrv_raw:
-            try:
-                hrv_status = hrv_raw.get("hrvSummary", {}).get("status", "Unknown")
-            except Exception:
-                pass
-
-        sleep_score = None
-        sleep_deep_min = sleep_rem_min = sleep_light_min = sleep_awake_min = None
-        resp_avg = resp_low = resp_high = None
-        spo2_avg = spo2_low = None
-        if sleep_raw:
-            try:
-                dto = sleep_raw.get("dailySleepDTO", {}) or {}
-                sleep_score = dto.get("sleepScores", {}).get("overall", {}).get("value")
-                # Sleep stages (seconds → minutes)
-                if dto.get("deepSleepSeconds") is not None:
-                    sleep_deep_min  = round(dto["deepSleepSeconds"] / 60, 1)
-                if dto.get("remSleepSeconds") is not None:
-                    sleep_rem_min   = round(dto["remSleepSeconds"] / 60, 1)
-                if dto.get("lightSleepSeconds") is not None:
-                    sleep_light_min = round(dto["lightSleepSeconds"] / 60, 1)
-                if dto.get("awakeSleepSeconds") is not None:
-                    sleep_awake_min = round(dto["awakeSleepSeconds"] / 60, 1)
-                # Respiration (breaths/min) — HRV crash predictor
-                resp_avg  = dto.get("averageRespirationValue")
-                resp_low  = dto.get("lowestRespirationValue")
-                resp_high = dto.get("highestRespirationValue")
-                # SpO2 (%) — altitude prep baseline
-                spo2_avg  = dto.get("averageSpO2Value")
-                spo2_low  = dto.get("lowestSpO2Value")
-            except Exception as e:
-                logger.debug(f"Sleep extras parse error: {e}")
-
-        data = {
-            "date":          date_str,
-            "body_battery":  summary.get("bodyBatteryMostRecentValue"),
-            "bb_high":       summary.get("bodyBatteryHighestValue"),
-            "bb_low":        summary.get("bodyBatteryLowestValue"),
-            "hrv_status":    hrv_status,
-            "resting_hr":    summary.get("restingHeartRate"),
-            "stress_avg":    summary.get("averageStressLevel"),
-            "sleep_score":   sleep_score,
-            # Sleep stages (minutes) — Plan A Tier 1
-            "sleep_deep_min":  sleep_deep_min,
-            "sleep_rem_min":   sleep_rem_min,
-            "sleep_light_min": sleep_light_min,
-            "sleep_awake_min": sleep_awake_min,
-            # Respiratory rate (breaths/min) — HRV crash early warning
-            "respiratory_avg":  resp_avg,
-            "respiratory_low":  resp_low,
-            "respiratory_high": resp_high,
-            # SpO2 (%) — Fuji altitude baseline
-            "spo2_avg": spo2_avg,
-            "spo2_low": spo2_low,
-            "fetched_at":    datetime.now().isoformat(),
-            "_source":       "live",
-        }
-        _save_health_cache(date_str, data)
-        logger.info(f"✅ Health data fetched live: {date_str}")
-        return data
-
-    except Exception as e:
-        logger.warning(f"⚠️  API ไม่พร้อม ({e}) — ลอง fallback cache...")
-
-        # Fallback: ใช้ cache เก่า แม้จะหมด TTL แล้ว
-        stale = _load_health_cache(date_str)
-        if stale:
-            age_h = (time.time() - path.stat().st_mtime) / 3600
-            stale["_source"] = f"cache_stale ({age_h:.1f}h ago)"
-            logger.warning(f"📦 Using stale cache ({age_h:.1f}h old): {date_str}")
-            return stale
-
-        # ไม่มี cache เลย — คืน skeleton ที่บอกว่าไม่มีข้อมูล
-        logger.error(f"❌ ไม่มีข้อมูล health สำหรับ {date_str} ทั้ง live และ cache")
-        return {
-            "date":        date_str,
-            "body_battery": None,
-            "hrv_status":  "Unknown",
-            "resting_hr":  None,
-            "stress_avg":  None,
-            "sleep_score": None,
-            "_source":     "unavailable",
-        }
+    logger.error(f"❌ ไม่มีข้อมูล wellness สำหรับ {date_str} ทั้ง live และ master")
+    return {
+        "date":        date_str,
+        "body_battery": None,
+        "hrv_status":  "Unknown",
+        "resting_hr":  None,
+        "stress_avg":  None,
+        "sleep_score": None,
+        "_source":     "unavailable",
+    }
 
 
 # ---------------------------------------------------------------------------

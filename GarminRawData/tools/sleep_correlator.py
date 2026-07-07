@@ -1,6 +1,6 @@
 """
 sleep_correlator.py — Correlate sleep score → next-day HR drift + performance
-Reads health_cache + running_activities_all.json
+Reads wellness/ + running_activities_all.json
 
 Usage:
     python3 sleep_correlator.py
@@ -15,7 +15,7 @@ from pathlib import Path
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))
-CACHE_DIR = Path.home() / ".config/garmin-coach/health_cache"
+CACHE_DIR = Path(__file__).resolve().parent.parent / "wellness"
 ACTS_FILE = Path(__file__).parent.parent / "running_activities_all.json"
 
 
@@ -63,7 +63,7 @@ def backfill_health_cache(days: int = 90):
     fetched = skipped = failed = 0
 
     for d_str in dates_to_fetch:
-        cache_path = CACHE_DIR / f"health_{d_str}.json"
+        cache_path = CACHE_DIR / f"wellness_{d_str}.json"
         if cache_path.exists():
             print(f"  ⏭  {d_str} — already cached")
             skipped += 1
@@ -90,9 +90,9 @@ def load_health(days: int = 90) -> dict:
     today = date.today()
     cutoff = today - timedelta(days=days)
     data = {}
-    for f in CACHE_DIR.glob("health_*.json"):
+    for f in CACHE_DIR.glob("wellness_*.json"):
         try:
-            d = date.fromisoformat(f.stem.replace("health_", ""))
+            d = date.fromisoformat(f.stem.replace("wellness_", ""))
             if d < cutoff:
                 continue
             with open(f) as fh:
@@ -170,7 +170,7 @@ def correlate(days: int = 90, show_insight: bool = False):
         })
 
     if not rows:
-        print("ไม่มีข้อมูลเพียงพอ — ต้องมี health_cache + activities ที่ match กัน")
+        print("ไม่มีข้อมูลเพียงพอ — ต้องมี wellness/ + activities ที่ match กัน")
         return
 
     # Bucket by sleep quality

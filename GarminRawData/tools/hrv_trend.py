@@ -1,6 +1,6 @@
 """
 hrv_trend.py — HRV baseline + weekly trend + overtraining early warning
-Reads health_cache/*.json
+Reads wellness/*.json (single source of truth)
 
 Usage:
     python3 hrv_trend.py
@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from collections import defaultdict
 
-CACHE_DIR = Path.home() / ".config/garmin-coach/health_cache"
+CACHE_DIR = Path(__file__).resolve().parent.parent / "wellness"
 
 HRV_SCORE = {"BALANCED": 2, "LOW": 1, "POOR": 0, "UNBALANCED": 0}
 HRV_EMOJI = {"BALANCED": "🟢", "LOW": "🟡", "POOR": "🔴", "UNBALANCED": "🔴"}
@@ -23,9 +23,9 @@ def load_health(days: int = 90) -> list[dict]:
     today = date.today()
     cutoff = today - timedelta(days=days)
     records = []
-    for f in CACHE_DIR.glob("health_*.json"):
+    for f in CACHE_DIR.glob("wellness_*.json"):
         try:
-            d = date.fromisoformat(f.stem.replace("health_", ""))
+            d = date.fromisoformat(f.stem.replace("wellness_", ""))
             if d < cutoff:
                 continue
             with open(f) as fh:
