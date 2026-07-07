@@ -2,6 +2,7 @@
   "_comment": "SINGLE SOURCE OF TRUTH — copy this file to athlete.json and fill in your values. config.py reads athlete.json on import and derives paces/zones. Never edit config.py directly.",
   "_setup": "1) cp athlete.example.json athlete.json  2) Fill in your VDOT (from a recent race) and LTHR (from a Friel field test)  3) Run: .venv/bin/python3.13 ../tests/test_suite.py",
 
+  "name": "Your Name",
   "vdot": 40,
   "_vdot_help": "Use a recent race result at vdoto2.com. Update after every race or TT — never from training pace alone.",
   "lthr": 183,
