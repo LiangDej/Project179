@@ -239,11 +239,11 @@ def main():
     print(f"   {'Date':<12} {'HRV':<12} {'RHR':>5} {'BB↑':>5} {'Sleep':>6}")
     print("   " + "-" * 44)
     for r in records[-21:]:
-        hrv = r.get("hrv_status", "?")
+        hrv = r.get("hrv_status") or "?"
         emoji = HRV_EMOJI.get(hrv, "❓")
-        rhr = str(r.get("resting_hr", "?"))
-        bb = str(r.get("bb_high", "?"))
-        sleep = str(r.get("sleep_score", "?"))
+        rhr = str(r.get("resting_hr") if r.get("resting_hr") is not None else "?")
+        bb = str(r.get("bb_high") if r.get("bb_high") is not None else "?")
+        sleep = str(r.get("sleep_score") if r.get("sleep_score") is not None else "?")
         print(f"   {str(r['_date']):<12} {emoji}{hrv:<11} {rhr:>5} {bb:>5} {sleep:>6}")
     print("=" * 60)
 
