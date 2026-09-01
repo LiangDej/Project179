@@ -5,7 +5,7 @@ Combines: training_planner + PMC + HRV trend + weekly volume + injury risk
 
 Usage:
     python3 season_summary.py
-    python3 season_summary.py --race hm
+    python3 season_summary.py --race sponsor21
 """
 import sys, os, json, argparse
 from datetime import date, timedelta
@@ -30,7 +30,7 @@ def main():
     parser = argparse.ArgumentParser()
     try:
         from race_registry import race_choices, active_race_key
-        _race_default, _race_choices = active_race_key(), race_choices(active_only=False)
+        _race_default, _race_choices = active_race_key(), race_choices()
     except Exception:
         _race_default, _race_choices = "atm", ["hm", "atm", "fuji"]
     parser.add_argument("--race", default=_race_default, choices=_race_choices)

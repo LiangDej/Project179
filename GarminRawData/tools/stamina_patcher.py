@@ -148,8 +148,16 @@ def patch(activity_id: int | None = None, backfill: bool = False) -> int:
             changed += 1
 
     else:
-        # Default: patch latest session (sessions sorted desc by date)
-        if _patch_one(sessions[0]):
+        # Default: patch latest session — pick by activity_id (monotonic with
+        # time) rather than sessions[0]/date string, since a non-ISO "date"
+        # value (e.g. "custom") sorts lexicographically above any real date
+        # and would otherwise pin a stale session at position 0 forever.
+        with_id = [s for s in sessions if s.get("activity_id")]
+        if not with_id:
+            print("⚠️  no session with activity_id found")
+            return 0
+        latest = max(with_id, key=lambda s: s["activity_id"])
+        if _patch_one(latest):
             changed += 1
 
     if changed > 0:

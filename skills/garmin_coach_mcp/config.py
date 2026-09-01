@@ -41,6 +41,7 @@ ATHLETE = {
     "lthr":                   _AJ.get("lthr", 183),    # Friel 30-min TM test 2026-06-09
     "lthr_date":              _AJ.get("lthr_date", "2026-06-09"),
     "lthr_confidence":        _AJ.get("lthr_confidence", "MODERATE"),
+    "pain_status":            _AJ.get("pain_status", "none"),  # none|mild|moderate — persisted injury state
 }
 ATHLETE["hrr"] = ATHLETE["mhr"] - ATHLETE["rhr"]   # derived
 
@@ -126,14 +127,23 @@ TRAINING_PHASES = [
     {
         "name":       "Base Building II",
         "start":      date(2026, 8, 1),
-        "end":        date(2026, 8, 31),
+        "end":        date(2026, 8, 9),
         "phase":      "base",
         "km_target":  180,
     },
     {
-        # Quality I ยาว 4 สัปดาห์ — LR 30km สัปดาห์ที่ 3 (Sep 20), deload สัปดาห์ที่ 4
+        # Quality I start moved up to match MASTER_PLAN_2026.md Section 5
+        # (revised 2026-07-01): Quality phase begins Aug 10, not Sep 1 — the
+        # 3-week lag here was the bug (session_prescriber was still handing
+        # out Base-phase-only T work with no Interval component in what
+        # should already be Quality phase). End date (Sep 27) left as-is —
+        # config.py's Sep–Nov phase structure has since diverged from the
+        # master-plan doc in ways beyond just dates (different phase names/
+        # boundaries around Sponsor21); that needs a deliberate reconciliation
+        # pass, not a silent date edit, so it's flagged separately rather than
+        # changed here. LR 30km สัปดาห์ที่ 3, deload สัปดาห์ที่ 4.
         "name":       "Quality I",
-        "start":      date(2026, 9, 1),
+        "start":      date(2026, 8, 10),
         "end":        date(2026, 9, 27),
         "phase":      "quality",
         "km_target":  190,

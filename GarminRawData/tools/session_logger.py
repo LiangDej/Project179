@@ -369,7 +369,10 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
             print(f"⚠️  auto_log: missing required fields (date/activity_id/total_km) — skip")
             return
         master.setdefault("sessions", []).append(record)
-        master["sessions"].sort(key=lambda s: s["date"], reverse=True)
+        # Sort by activity_id (monotonic with time) not date-string — a
+        # non-ISO "date" value (e.g. "custom") would otherwise sort above
+        # every real date and pin a stale session at index 0 permanently.
+        master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
         _save_master(master)
         print(f"✅ Auto-logged (easy) → sessions_master.json | {record['total_km']}km")
     else:
@@ -417,7 +420,10 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
                                treadmill_phases=treadmill_phases,
                                date_str_fallback=date_str)
         master.setdefault("sessions", []).append(record)
-        master["sessions"].sort(key=lambda s: s["date"], reverse=True)
+        # Sort by activity_id (monotonic with time) not date-string — a
+        # non-ISO "date" value (e.g. "custom") would otherwise sort above
+        # every real date and pin a stale session at index 0 permanently.
+        master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
         _save_master(master)
         q_count = len([l for l in record["laps"] if l.get("role") == "quality"])
         print(f"✅ Logged → sessions_master.json | {session_type} | quality laps: {q_count}")
@@ -480,7 +486,7 @@ def batch_import_easy(since_date: str | None = None):
         except Exception as e:
             print(f"❌ {e}")
 
-    master["sessions"].sort(key=lambda s: s["date"], reverse=True)
+    master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
     _save_master(master)
     print(f"\n✅ Imported {imported}/{len(easy_acts)} easy sessions → sessions_master.json")
 
@@ -671,7 +677,7 @@ def main():
                            treadmill_phases=treadmill_phases)
 
     master.setdefault("sessions", []).append(record)
-    master["sessions"].sort(key=lambda s: s["date"], reverse=True)
+    master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
     _save_master(master)
 
     q_count = len([l for l in record["laps"] if l.get("role") == "quality"])

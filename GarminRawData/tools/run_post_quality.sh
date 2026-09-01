@@ -22,12 +22,17 @@ echo ""
 echo "▶ Step 1/3 — Post Session Analyzer"
 echo "────────────────────────────────────"
 
+# post_session_analyzer.py prompts interactively to confirm sessions_master
+# logging (Y/n), session-type override, and per-lap role annotation. Feed "Y"
+# once + enough blank lines (Enter=keep default) so it never hangs waiting
+# for input when this script runs unattended.
+AUTO_ANSWERS="Y$(printf '\n%.0s' {1..50})"
 if [ -n "${1:-}" ]; then
   echo "📌 Activity ID: $1"
-  "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --id "${1:-}" --update-log
+  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --id "${1:-}" --update-log
 else
   echo "📌 Latest activity"
-  "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest --update-log
+  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest --update-log
 fi
 
 # ── Step 1.5: Patch TM pace in sessions.json ───────────────────────────────

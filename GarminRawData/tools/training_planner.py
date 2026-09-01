@@ -3,9 +3,9 @@ training_planner.py — Full season plan from VDOT + race dates + current phase
 Works backwards from target race → builds periodized weekly blocks
 
 Usage:
-    python3 training_planner.py --race fuji
-    python3 training_planner.py --race fuji --weeks 8
-    python3 training_planner.py --race hm --date 2026-05-17
+    python3 training_planner.py --race bangsaen
+    python3 training_planner.py --race bangsaen --weeks 8
+    python3 training_planner.py --race sponsor21 --date 2026-05-17
 """
 import sys, os, argparse
 from datetime import date, timedelta
@@ -30,7 +30,7 @@ try:
         k: {"name": f"{r['name']} ({r['dist_km']:.0f}km)",
             "dist_km": r["dist_km"],
             "date": date.fromisoformat(r["date"])}
-        for k, r in load_races().items()
+        for k, r in load_races().items() if r.get("active", True)
     }
     DEFAULT_RACE = active_race_key()
 except Exception:

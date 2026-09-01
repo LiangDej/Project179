@@ -200,7 +200,9 @@ def build_action_plan(day_info, decision, day_type, taper_race, taper_days):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pain", choices=["none", "mild", "moderate"], default="none")
+    parser.add_argument("--pain", choices=["none", "mild", "moderate"],
+                        default=ATHLETE.get("pain_status", "none"),
+                        help="Overrides athlete.json → pain_status for this run only")
     parser.add_argument("--type", choices=["T", "I"], default=None, dest="quality_type",
                         help="Override quality session type")
     parser.add_argument("--offline", action="store_true",
@@ -258,7 +260,7 @@ def main():
         health = {"body_battery": None, "hrv_status": "Unknown",
                   "resting_hr": None, "_source": "unavailable"}
 
-    bb          = health.get("body_battery")
+    bb          = health.get("bb_high") if health.get("bb_high") is not None else health.get("body_battery")
     hrv_status  = health.get("hrv_status", "Unknown")
     rhr         = health.get("resting_hr")
     sleep_score = health.get("sleep_score")
@@ -273,7 +275,9 @@ def main():
 
     src_tag = f" [{src}]" if src != "live" else ""
     print(f"\n📊 BODY STATUS{src_tag}")
-    print(f"   🔋 Body Battery : {bb if bb is not None else 'N/A'}  {_icon(bb,75,50)}")
+    bb_now = health.get("body_battery")
+    bb_now_tag = f"  (ตอนนี้ {bb_now})" if bb_now is not None and bb_now != bb else ""
+    print(f"   🔋 Body Battery : {bb if bb is not None else 'N/A'} (peak เช้า){bb_now_tag}  {_icon(bb,75,50)}")
     print(f"   💓 HRV          : {hrv_status}")
     print(f"   ❤️  Resting HR   : {rhr} bpm  {_icon(rhr,50,58,invert=True)}" if rhr else "   ❤️  Resting HR   : N/A")
     sleep_icon = _icon(sleep_score, 80, 60)

@@ -258,6 +258,19 @@ def functional_tests():
           "173" in tl or "2026-11" in tl or adate.replace("2026-","").lstrip("0")+" " in tl
           or "ATM" in tl, "countdown missing active race")
 
+    # CONSISTENCY: every --race tool must reject archived race keys (regression
+    # guard for the class of bug where a tool builds its choices from ALL
+    # races instead of active-only, silently accepting e.g. --race fuji/hm/atm)
+    archived_keys = [k for k, r in rr.load_races().items() if not r.get("active", True)]
+    race_tools = ["nutrition_calculator.py", "taper_monitor.py", "season_summary.py",
+                  "race_pace_planner.py", "training_planner.py", "weather_adjuster.py"]
+    for tool in race_tools:
+        for key in archived_keys:
+            rc, out = run_tool([tool, "--race", key])
+            check(f"flow: {tool} rejects archived --race {key}",
+                  rc != 0 and "invalid choice" in out.lower(),
+                  f"expected argparse rejection, got rc={rc}")
+
 
 # ===========================================================================
 def main():

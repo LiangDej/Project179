@@ -275,7 +275,7 @@ Step 4 — Build training block ด้วย VDOT/zones ที่ confirm แล
 
 **Products:**
 - Gel: [Amino Vital Shot](https://runnercart.com/products/amino-vital-shot) — Na **90mg**/ซอง
-- Electrolyte: [Prevo Caps EVO](https://runnercart.com/products/prevo-caps-electrolyte-capsules-bcaa) — Na **650mg**/แคป (Trisodium Citrate, label confirmed พ.ค.26)
+- Electrolyte: [Prevo Caps EVO](https://runnercart.com/products/prevo-caps-electrolyte-capsules-bcaa) — Na **150mg**/แคป (as Trisodium Citrate 650mg — 650mg is the salt-compound weight, NOT elemental Na; corrected from photo label 2026-08-02), K 50mg, Ca 20mg, Mg 15mg, BCAA 50mg/แคป
 
 > ⚠️ ตัวเลข nutrition ทั้งหมดอ่านจาก `athlete.json` (single source) — `session_prescriber.py` ดึงอัตโนมัติ อย่า hardcode
 
@@ -362,7 +362,7 @@ Step 4 — Build training block ด้วย VDOT/zones ที่ confirm แล
 | `running_activities_all.json` | training_load, injury_risk, taper_monitor |
 | `QualitySessionLog/sessions.json` | race_predictor, skill_sync, energy_efficiency_scorer, **vdot_estimator** (quality laps) |
 | `QualitySessionLog/sessions_master.json` | session_logger, tm_patch (lap-level, 48 sessions), **vdot_estimator (quality_km + quality-lap weighted avg pace สำหรับ GPS sessions)** |
-| `health_cache/` | daily_brief, session_prescriber (TTL 2hr) |
+| `wellness/` | daily_brief, session_prescriber (TTL 2hr) |
 
 ## 📤 Output Format Rule — ทุก LLM ต้องทำแบบนี้
 
@@ -578,9 +578,36 @@ Action next session: [1 adjustment]
 > ✅ **ตารางนี้อัปเดตอัตโนมัติโดย `skill_sync.py`** — ไม่ต้องใส่ด้วยมือ
 > รัน: `bash run_post_quality.sh` หลัง Quality session → อัปตาราง + sessions_master.json
 > 🏃 = TM session (HR-inferred pace) | Grade: S/A/B/C
+>
+> ⚠️ **Staleness warning:** ตารางนี้ sync ก็ต่อเมื่อ session ผ่าน `run_post_quality.sh` เท่านั้น —
+> ถ้า quality session ถูก log ผ่าน `post_session_analyzer.py`/`session_logger.py` โดยตรง (debugging,
+> manual override) ตารางนี้จะ**ไม่อัปเดต**และเก่ากว่าความจริง **อย่าเชื่อวันที่แถวบนสุดของตารางนี้ว่าคือ
+> session ล่าสุด** — เช็คของจริงด้วย `python3 session_logger.py --summary` เสมอก่อนสรุปอะไร
 
 | วันที่ | ประเภท | เพซ(active) | AvgHR | MaxHR | Cadence | Power | GCT | Decoupling | Notes |
 |---|---|---|---|---|---|---|---|---|---|
+| 2026-08-04 | T | 5:46/km | 172 | 193 | 176spm | 323W | 244ms | 4.7% | S 🏆 |
+| 2026-07-30 | T | 5:57/km | 170 | 190 | 177spm | 290W | 250ms | 8.2% | B 🟡 🏃 |
+| 2026-07-28 | T | 5:52/km | 170 | 193 | 178spm | 324W | 241ms | 5.0% | A ✅ |
+| 2026-07-14 | M | 5:34/km | 168 | 187 | 170spm | 297W | 256ms | 4.4% | S 🏆 |
+| 2026-07-09 | M | 5:51/km | 167 | 186 | 168spm | 285W | 263ms | 3.7% | A ✅ |
+| 2026-07-01 | T | 5:08/km | 168 | 184 | 166spm | 287W | 263ms | -1.8% | A ✅ 🏃 |
+| 2026-06-23 | Tempo | 5:11/km | 167 | 183 | 168spm | 296W | 258ms | 3.3% | S 🏆 🏃 |
+| 2026-06-14 | E | 6:22/km | 154 | 166 | 156spm | 273W | 283ms | 3.8% | 🏃 |
+| 2026-06-09 | T | 5:03/km | 170 | 187 | 160spm | 262W | 277ms | 3.5% | A ✅ 🏃 |
+| 2026-06-01 | I | 4:55/km | 183 | 194 | 174spm | 334W | 242ms | 6.0% | A ✅ |
+| 2026-05-26 | T | 5:14/km | 163 | 181 | 160spm | 244W | 285ms | 6.8% | B 🟡 🏃 |
+| 2026-05-10 | T | 5:21/km | 174 | 180 | 166spm | 247W | 286ms | 9.1% | B 🟡 🏃 |
+| 2026-05-09 | E | 6:40/km | 150 | 168 | 152spm | 263W | 296ms | -1.7% | 🏃 |
+| 2026-05-07 | I | 5:10/km | 161 | 178 | 158spm | 244W | 289ms | 3.0% | B 🟡 🏃 |
+| 2026-04-30 | T | 5:40/km | 159 | 174 | 154spm | 238W | 297ms | 5.6% | B 🟡 🏃 |
+| 2026-04-22 | T | 6:07/km | 162 | 183 | 162spm | 287W | 274ms | 0.7% | A ✅ |
+| 2026-04-16 | T | 6:02/km | 165 | 181 | 162spm | 290W | 272ms | 2.8% | A ✅ |
+| 2026-04-10 | Tempo | 5:53/km | 161 | 188 | 158spm | 279W | 281ms | 9.6% | B 🟡 🏃 |
+| 2026-04-01 | T | 5:42/km | 165 | 186 | 166spm | 304W | 264ms | 5.7% | A ✅ |
+| 2026-03-25 | T | 5:38/km | 165 | 186 | 168spm | 307W | 261ms | 9.9% | B 🟡 |
+| 2026-03-19 | I | 5:48/km | 166 | 189 | 166spm | 296W | 264ms | 8.5% | B 🟡 |
+| 2026-03-17 | I | 5:41/km | 163 | 191 | 166spm | 302W | 264ms | -0.9% | A ✅ |
 | YYYY-MM-DD | T | x:xx/km | xxx | xxx | xxxspm | xxxW | xxxms | x.x% | A ✅ 🏃 |
 | YYYY-MM-DD | I | x:xx/km | xxx | xxx | xxxspm | xxxW | xxxms | x.x% | A ✅ |
 

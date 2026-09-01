@@ -12,11 +12,11 @@ race_pace_planner.py — Race Day Pace Planner
 ถ้ามี elevation → adjust pace ตาม grade (+/- sec/km per % grade)
 
 Usage:
-    python3 race_pace_planner.py --race hm              # พระราม 8 HM
-    python3 race_pace_planner.py --race fuji            # Fuji Marathon
-    python3 race_pace_planner.py --race hm --goal 110  # goal 1:50
-    python3 race_pace_planner.py --race fuji --elevation fuji_elevation.csv
-    python3 race_pace_planner.py --vdot 40 --race hm   # override VDOT
+    python3 race_pace_planner.py --race sponsor21              # Sponsor Run Bangkok HM
+    python3 race_pace_planner.py --race bangsaen                # Bangsaen42 Marathon
+    python3 race_pace_planner.py --race sponsor21 --goal 110    # goal 1:50
+    python3 race_pace_planner.py --race bangsaen --elevation bangsaen_elevation.csv
+    python3 race_pace_planner.py --vdot 40 --race sponsor21     # override VDOT
 """
 
 import sys
@@ -45,6 +45,8 @@ def _build_races() -> dict:
         from race_registry import load_races
         out = {}
         for k, r in load_races().items():
+            if not r.get("active", True):
+                continue
             stations = r.get("stations_km") or []
             aid = round(r["dist_km"] / len(stations), 1) if stations else 5.0
             out[k] = {

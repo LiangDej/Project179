@@ -13,7 +13,7 @@ Usage:
     python3 taper_monitor.py --bb 65             # override BB วันนี้
     python3 taper_monitor.py --mileage 28        # override mileage สัปดาห์นี้
     python3 taper_monitor.py --peak-km 55.5      # override peak week km
-    python3 taper_monitor.py --race fuji         # เลือก race (hm หรือ fuji)
+    python3 taper_monitor.py --race sponsor21    # เลือก race (bangsaen หรือ sponsor21)
 """
 
 import sys

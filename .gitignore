@@ -53,6 +53,10 @@ GarminRawData/MASTER_PLAN_2026.md
 # Personal daily wellness data (sleep/HRV/BB) — same sensitivity as athlete.json
 GarminRawData/wellness/
 
+# Third-party (partner/friend) Garmin wellness data — someone else's personal
+# health data, never belongs in this repo's history under any circumstances.
+GarminRawData/wellness_partner/
+
 # VME lab / customer infra project — separate from the running-coach project,
 # contains plaintext lab credentials and customer environment details.
 # Never belongs in this repo's history.

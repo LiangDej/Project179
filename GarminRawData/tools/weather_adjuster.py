@@ -3,10 +3,10 @@ weather_adjuster.py — Race-day weather → adjusted pace + HR targets
 Uses OpenWeather API + Ely et al. 2007 heat penalty + WBGT (Stull 2011)
 
 Usage:
-    python3 weather_adjuster.py --race hm
-    python3 weather_adjuster.py --race fuji --date 2026-12-13 --time 09:00
+    python3 weather_adjuster.py --race sponsor21
+    python3 weather_adjuster.py --race bangsaen --date 2026-11-15 --time 03:00
     python3 weather_adjuster.py --manual --temp 24 --humidity 80 --wind 2 --dew 20
-    python3 weather_adjuster.py --race hm --forecast        # 3-day lookahead @ race time
+    python3 weather_adjuster.py --race sponsor21 --forecast # 3-day lookahead @ race time
 
 Setup:
     Add OPENWEATHER_API_KEY=xxx to ~/.config/garmin-coach/.env
@@ -364,7 +364,7 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
     adj_ceilings = [c + hr_adj for c in base_ceilings]
 
     # Electrolyte advice — computed by nutrition_calculator.py (ACSM/Sawka 2007)
-    # Run: python3 nutrition_calculator.py --race hm --temp T --humidity H --duration D
+    # Run: python3 nutrition_calculator.py --race sponsor21 --temp T --humidity H --duration D
     # Delegate to nutrition_calculator.plan_caps() — SINGLE source of truth.
     # (Previously this block duplicated the buggy max(1,…)+pre_caps=2 logic that
     #  produced ~109% over-replacement; now it calls the clamped solver.)
@@ -428,7 +428,7 @@ def main():
     parser = argparse.ArgumentParser(description="Race weather adjustment")
     try:
         from race_registry import race_choices, active_race_key
-        _wc, _wd = race_choices(active_only=False), active_race_key()
+        _wc, _wd = race_choices(), active_race_key()
     except Exception:
         _wc, _wd = ["hm", "fuji"], "hm"
     parser.add_argument("--race", default=_wd, choices=_wc)
