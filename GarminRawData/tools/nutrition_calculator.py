@@ -7,8 +7,8 @@ Sources:
   Body-mass calibration mode: Montain et al. 2007 (J Athl Train 42:333)
 
 Usage:
-    python3 nutrition_calculator.py --race hm --temp 27 --humidity 82 --dew 21 --wind 1.5
-    python3 nutrition_calculator.py --race hm --temp 27 --humidity 82 --duration 115
+    python3 nutrition_calculator.py --race sponsor21 --temp 27 --humidity 82 --dew 21 --wind 1.5
+    python3 nutrition_calculator.py --race sponsor21 --temp 27 --humidity 82 --duration 115
     python3 nutrition_calculator.py --calibrate --pre_weight 71.6 --post_weight 70.1 --fluid_ml 500 --duration 60
 """
 import sys, os, argparse, math
@@ -43,6 +43,8 @@ def _build_race_config() -> dict:
         from race_registry import load_races
         out = {}
         for k, r in load_races().items():
+            if not r.get("active", True):
+                continue
             # rough default duration: marathon ~250min, HM ~115min, scale by dist
             goal = r.get("goal_min")
             dur = goal if goal else round(r["dist_km"] * 5.9)

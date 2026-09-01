@@ -113,19 +113,19 @@ cd GarminRawData/tools
 ../../.venv/bin/python3.13 daily_brief.py
 ../../.venv/bin/python3.13 post_session_analyzer.py --latest
 ../../.venv/bin/python3.13 session_logger.py --summary
-../../.venv/bin/python3.13 race_pace_planner.py --race hm
-../../.venv/bin/python3.13 taper_monitor.py --race hm --bb 72
+../../.venv/bin/python3.13 race_pace_planner.py --race sponsor21
+../../.venv/bin/python3.13 taper_monitor.py --race sponsor21 --bb 72
 ../../.venv/bin/python3.13 session_prescriber.py --week current
 ../../.venv/bin/python3.13 weekly_load_report.py
 ../../.venv/bin/python3.13 injury_risk_detector.py --json
 ../../.venv/bin/python3.13 vdot_estimator.py
 ../../.venv/bin/python3.13 energy_efficiency_scorer.py
 # Analysis tools (PYTHONPATH needed for weather_adjuster):
-PYTHONPATH="../../skills/garmin_coach_mcp" ../../.venv/bin/python3.13 weather_adjuster.py --race hm --manual --temp 27 --humidity 82 --wind 1.5 --dew 21 --base-pace 5:07
+PYTHONPATH="../../skills/garmin_coach_mcp" ../../.venv/bin/python3.13 weather_adjuster.py --race sponsor21 --manual --temp 27 --humidity 82 --wind 1.5 --dew 21 --base-pace 5:07
 ../../.venv/bin/python3.13 hrv_trend.py --days 60
 ../../.venv/bin/python3.13 sleep_correlator.py --insight
 ../../.venv/bin/python3.13 training_planner.py --race bangsaen
-../../.venv/bin/python3.13 nutrition_calculator.py --race hm --temp 27 --humidity 82 --duration 115
+../../.venv/bin/python3.13 nutrition_calculator.py --race sponsor21 --temp 27 --humidity 82 --duration 115
 ../../.venv/bin/python3.13 nutrition_calculator.py --calibrate --pre_weight 72.0 --post_weight 70.5 --fluid_ml 500 --duration 60
 ```
 

@@ -202,11 +202,11 @@ def _to_step(d: dict) -> ExecutableStep | RG:
 
 def wrap_workout(name: str, steps: list, est_secs: int) -> RunningWorkout:
     """Return RunningWorkout instance (required by garminconnect v0.3.3+)."""
-    tag = "RUNLAB.IO"
+    tag = "P179"
     tagged_name = name
     if not name.startswith(tag):
         tagged_name = f"{tag} - {name}"
-        
+
     segment = WorkoutSegment(
         segmentOrder=1,
         sportType=SPORT,
@@ -214,7 +214,7 @@ def wrap_workout(name: str, steps: list, est_secs: int) -> RunningWorkout:
     )
     return RunningWorkout(
         workoutName=tagged_name,
-        description="RUNLAB.IO — auto-generated weekly training plan",
+        description="P179 — auto-generated weekly training plan",
         estimatedDurationInSecs=est_secs,
         workoutSegments=[segment],
     )
@@ -363,14 +363,29 @@ def session_to_workout(session: dict) -> dict | None:
         return build_easy(f"Easy {dist:.0f}km — {weekday} {date_s}", dist, e_slow, e_fast)
 
     elif stype == "quality1":
-        # Parse: "3×10min @ T-pace" or "5×8min T"
+        # Readiness downgrades (daily_brief.py / session_prescriber.py) rewrite
+        # `workout` to a plain Easy description but leave `type` as "quality1" —
+        # match on the actual text, not just the type, or a downgraded day
+        # silently pushes a full T-interval workout to the watch anyway.
         m_reps = re.search(r"(\d+)[×x](\d+)min", workout)
+        if not m_reps and re.search(r"\beasy\b", workout, re.IGNORECASE):
+            m = re.search(r"(\d+(?:\.\d+)?)km", workout)
+            dist = float(m.group(1)) if m else 8.0
+            return build_easy(f"Easy {dist:.0f}km — {weekday} {date_s}", dist, e_slow, e_fast)
         reps, rep_min = (int(m_reps.group(1)), int(m_reps.group(2))) if m_reps else (3, 10)
         return build_threshold(f"Quality T {reps}×{rep_min}min — {weekday} {date_s}",
                                reps, rep_min, t_slow, t_fast)
 
     elif stype == "quality2":
-        # Could be T or I depending on phase — check workout string
+        # Same downgrade check as quality1 above.
+        m_reps_check = re.search(r"(\d+)[×x](\d+)min", workout)
+        has_interval_marker = "Interval" in workout or "×1km" in workout or "×1000" in workout
+        has_strides_marker  = "Strides" in workout or "strides" in workout
+        if not m_reps_check and not has_interval_marker and not has_strides_marker \
+                and re.search(r"\beasy\b", workout, re.IGNORECASE):
+            m = re.search(r"(\d+(?:\.\d+)?)km", workout)
+            dist = float(m.group(1)) if m else 8.0
+            return build_easy(f"Easy {dist:.0f}km — {weekday} {date_s}", dist, e_slow, e_fast)
         if "Interval" in workout or "×1km" in workout or "×1000" in workout:
             m_reps = re.search(r"(\d+)[×x]", workout)
             reps = int(m_reps.group(1)) if m_reps else 5

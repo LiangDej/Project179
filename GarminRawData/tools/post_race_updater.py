@@ -42,16 +42,15 @@ Usage:
 """
 
 import sys
-import re
+import json
 import math
 import argparse
 from datetime import date
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).parent
-BASE_DIR  = TOOLS_DIR.parent
-COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
-CONFIG_PY = COACH_MCP / "config.py"
+TOOLS_DIR    = Path(__file__).parent
+BASE_DIR     = TOOLS_DIR.parent
+ATHLETE_JSON = BASE_DIR / "athlete.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
 from vdot_math import compute_vdot as _vdot_math_compute  # noqa: E402
@@ -160,60 +159,37 @@ def build_vdot_paces(paces: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Config read / write
+# athlete.json read / write — the single source of truth (config.py only
+# ever *derives* from this file on import; never hand-edit config.py here).
 # ---------------------------------------------------------------------------
+def _load_athlete() -> dict:
+    return json.loads(ATHLETE_JSON.read_text(encoding="utf-8"))
+
+
+def _save_athlete(data: dict) -> None:
+    ATHLETE_JSON.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
 def read_current_vdot() -> int:
-    text = CONFIG_PY.read_text(encoding="utf-8")
-    m = re.search(r'"vdot"\s*:\s*(\d+)', text)
-    return int(m.group(1)) if m else None
+    return _load_athlete().get("vdot")
 
 
-def apply_to_config(new_vdot: int, new_paces: dict,
-                    calibration_source: str, heat_adj_estimate: float | None) -> bool:
-    """Patch config.py: update vdot + VDOT_PACES + calibration metadata."""
-    text = CONFIG_PY.read_text(encoding="utf-8")
-
-    # 1. Update vdot integer
-    text = re.sub(
-        r'("vdot"\s*:\s*)\d+',
-        lambda m: f'{m.group(1)}{new_vdot}',
-        text,
-    )
-
-    # 2. Update calibration metadata fields if they exist
-    today_str = date.today().isoformat()
-    for field, value in [
-        ("vdot_source",             f'"{calibration_source}"'),
-        ("vdot_calibration_date",   f'"{today_str}"'),
-        ("vdot_calibration",        '"confirmed"'),
-        ("vdot_heat_adj_estimate",  str(round(heat_adj_estimate, 1)) if heat_adj_estimate else "None"),
-    ]:
-        text = re.sub(
-            rf'("{field}"\s*:\s*)[^,\n]+',
-            lambda m, v=value: f'{m.group(1)}{v}',
-            text,
-        )
-
-    # 3. Build new VDOT_PACES block
-    def _line(zone, lo, hi, label):
-        return f'    "{zone}": ({lo // 60} * 60 + {lo % 60}, {hi // 60} * 60 + {hi % 60}),   # {label}'
-
-    labels = {"E": "Easy", "M": "Marathon", "T": "Threshold",
-              "I": "Interval", "R": "Repetition"}
-    new_block = "VDOT_PACES = {\n"
-    for zone in ("E", "M", "T", "I", "R"):
-        lo, hi = new_paces[zone]
-        new_block += _line(zone, lo, hi, labels[zone]) + "\n"
-    new_block += "}"
-
-    text = re.sub(
-        r'VDOT_PACES\s*=\s*\{[^}]+\}',
-        new_block,
-        text,
-        flags=re.DOTALL,
-    )
-
-    CONFIG_PY.write_text(text, encoding="utf-8")
+def apply_to_athlete_json(new_vdot: int, new_paces: dict,
+                           calibration_source: str, heat_adj_estimate: float | None) -> bool:
+    """Update vdot + vdot_paces_sec + calibration metadata in athlete.json.
+    config.py re-derives ATHLETE/VDOT_PACES from these fields on every
+    import (see skills/garmin_coach_mcp/config.py) — no other file to touch.
+    """
+    data = _load_athlete()
+    data["vdot"]                  = new_vdot
+    data["vdot_source"]           = calibration_source
+    data["vdot_calibration_date"] = date.today().isoformat()
+    data["vdot_calibration"]      = "confirmed"
+    data["vdot_heat_adj_estimate"] = round(heat_adj_estimate, 1) if heat_adj_estimate else None
+    data["vdot_paces_sec"] = {zone: list(new_paces[zone]) for zone in ("E", "M", "T", "I", "R")}
+    _save_athlete(data)
     return True
 
 
@@ -235,7 +211,7 @@ def main():
     parser.add_argument("--tt-confirmed", action="store_true",
                         help="TM Time Trial result — bypasses heat guard, apply allowed")
     parser.add_argument("--apply", action="store_true",
-                        help="Apply changes to config.py (blocked for hot races)")
+                        help="Apply changes to athlete.json (blocked for hot races)")
     args = parser.parse_args()
 
     # ── Guard: require --temp unless TT ────────────────────────────────────
@@ -295,7 +271,7 @@ def main():
     # ── Heat guard ──────────────────────────────────────────────────────────
     if is_hot:
         print(f"\n🌡️  HOT RACE GUARD — {args.temp}°C > {HOT_THRESHOLD_C}°C")
-        print(f"   ❌ ห้าม apply raw VDOT {raw_vdot} เข้า config.py โดยตรง")
+        print(f"   ❌ ห้าม apply raw VDOT {raw_vdot} เข้า athlete.json โดยตรง")
         print(f"      เหตุผล: race HR confounded by heat + adrenaline + cardiovascular drift")
         print(f"              raw VDOT underestimates fitness จริง {heat_vdot - raw_vdot:.1f} จุด")
         print(f"\n   ✅ สิ่งที่ต้องทำ:")
@@ -304,15 +280,11 @@ def main():
         print(f"      3. รัน: python3 post_race_updater.py {args.race} [TT_time] --tt-confirmed --apply")
         print(f"\n   📌 heat-adj VDOT = {heat_vdot} บันทึกไว้แล้ว (ไม่ได้ apply เข้า zones)")
 
-        # Update only heat_adj_estimate in config (not vdot itself)
-        text = CONFIG_PY.read_text(encoding="utf-8")
-        text = re.sub(
-            r'("vdot_heat_adj_estimate"\s*:\s*)\d+\.?\d*',
-            lambda m: f'{m.group(1)}{heat_vdot}',
-            text,
-        )
-        CONFIG_PY.write_text(text, encoding="utf-8")
-        print(f"   💾 config.py → vdot_heat_adj_estimate = {heat_vdot} (updated)")
+        # Update only heat_adj_estimate in athlete.json (not vdot itself)
+        data = _load_athlete()
+        data["vdot_heat_adj_estimate"] = heat_vdot
+        _save_athlete(data)
+        print(f"   💾 athlete.json → vdot_heat_adj_estimate = {heat_vdot} (updated)")
         print(f"\n{'='*60}\n")
         return
 
@@ -335,15 +307,15 @@ def main():
 
     if args.apply:
         new_vdot_int = round(apply_vdot)
-        apply_to_config(new_vdot_int, new_ranges, calibration_source, heat_vdot)
-        print(f"\n✅ config.py updated:")
+        apply_to_athlete_json(new_vdot_int, new_ranges, calibration_source, heat_vdot)
+        print(f"\n✅ athlete.json updated (single source — config.py re-derives on next import):")
         print(f"   vdot                  = {new_vdot_int}")
         print(f"   vdot_source           = {calibration_source}")
         print(f"   vdot_calibration_date = {date.today().isoformat()}")
         print(f"   vdot_calibration      = confirmed")
-        print(f"   VDOT_PACES            = updated (all 5 zones)")
+        print(f"   vdot_paces_sec        = updated (all 5 zones)")
     else:
-        print(f"\n💡 Dry-run — เพิ่ม --apply เพื่ออัปเดต config.py จริง")
+        print(f"\n💡 Dry-run — เพิ่ม --apply เพื่ออัปเดต athlete.json จริง")
 
     print(f"\n{'='*60}\n")
 

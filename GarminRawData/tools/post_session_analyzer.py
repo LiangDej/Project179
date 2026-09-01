@@ -11,6 +11,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import json
 import argparse
@@ -210,10 +211,15 @@ def analyze(data):
             pace = canonical_pace
             avg_speed = canonical_speed
 
+    # Garmin streams single-leg cadence (~80-90) — double to full spm BEFORE
+    # rounding to int, not after, or truncating the raw mean first (e.g.
+    # int(82.8)=82 -> *2=164) systematically undercounts by 1-3 spm vs
+    # Garmin's own summary field (which doubles at full precision first).
     cads = [get_val(p, cad_idx) for p in active if get_val(p, cad_idx)]
-    avg_cad = int(sum(cads) / len(cads)) if cads else 0
-    if avg_cad > 0 and avg_cad < 120:
-        avg_cad = avg_cad * 2
+    avg_cad_raw = sum(cads) / len(cads) if cads else 0
+    if 0 < avg_cad_raw < 120:
+        avg_cad_raw *= 2
+    avg_cad = round(avg_cad_raw)
 
     gcts = [get_val(p, gct_idx) for p in active if get_val(p, gct_idx)]
     avg_gct = int(sum(gcts) / len(gcts)) if gcts else 0
@@ -244,7 +250,59 @@ def analyze(data):
     zone_pct = [round(c / total * 100, 1) for c in zone_counts]
 
     dc, hr1, hr2 = calculate_decoupling(metrics, hr_idx, dist_idx, speed_idx)
+
+    _zone_to_type = {"R": "Repetition (R)", "I": "Interval (I)",
+                      "T": "Threshold (T)", "M": "Marathon Pace",
+                      "E": "Easy Run"}
+
+    # Priority 1: cross-check against the prescribed workout name itself.
+    # garmin_workout_pusher.py names every pushed session "Quality <T/I/R>
+    # ..." (see build_threshold/build_interval) — if that tag is on the
+    # activity, it IS the prescribed type, no need to infer anything.
+    _act_name = (data.get("_activitySummary") or {}).get("activityName") or ""
+    _tag_match = re.search(r"\bQuality\s+([EMTIR])\b", _act_name)
+
+    # Priority 2 (no tag — manual/watch-recorded run): rep-window PACE (via
+    # _classify_speed, auto-tracks VDOT), for genuine multi-rep interval/
+    # threshold structures (≥2 reps split by recovery/WU/CD). Pace is the
+    # JD-prescribed target and stays stable rep-to-rep, while avg_hr is not
+    # — WU+CD dilute it toward Easy/M, and fatigue/heat drift it upward
+    # within the work block itself (see decoupling above), so HR-based
+    # classification can land on the wrong zone either way.
+
+    # Priority 3 (fallback): whole-session avg_hr — used as-is for true
+    # easy/long runs, and for a single unbroken block (TT/race/continuous
+    # tempo effort) where there's no prescribed pace to key off and HR is
+    # the truer intensity signal.
     session_type = classify_session(avg_hr, pace)
+    form_scope = "whole_session"
+    _splits_for_type = data.get("_activitySplits")
+    if _splits_for_type:
+        _lap_data = analyze_laps(_splits_for_type, is_treadmill)
+        if _lap_data and len(_lap_data["reps"]) > 1:
+            _reps = _lap_data["reps"]
+            _tot_t = sum(rp["duration_s"] for rp in _reps) or 1
+            _rep_pace = sum(rp["pace_min_km"] * rp["duration_s"] for rp in _reps) / _tot_t
+            _rep_speed_kmh = 60.0 / _rep_pace if _rep_pace > 0 else 0
+            if _rep_speed_kmh > 0:
+                session_type = _zone_to_type[_classify_speed(_rep_speed_kmh)]
+
+            # Same dilution problem as HR/pace classification above, but for
+            # form metrics: WU/CD/recovery jogs sit inside the plain speed>1.5
+            # "active" filter used below, so headline Cadence/GCT/Power/VR
+            # would otherwise blend easy-jog form with work-rep form. For a
+            # real multi-rep quality session, report form AS EXECUTED during
+            # the work reps only — duration-weighted across reps.
+            avg_cad   = sum(rp["avg_cadence"] * rp["duration_s"] for rp in _reps) / _tot_t
+            avg_pow   = sum(rp["avg_power"]   * rp["duration_s"] for rp in _reps) / _tot_t
+            avg_gct   = sum(rp["avg_gct"]     * rp["duration_s"] for rp in _reps) / _tot_t
+            avg_vr    = sum(rp["avg_vr"]      * rp["duration_s"] for rp in _reps) / _tot_t
+            avg_stride = sum(rp["avg_stride"] * rp["duration_s"] for rp in _reps) / _tot_t
+            avg_cad, avg_pow, avg_gct = round(avg_cad), round(avg_pow), round(avg_gct)
+            avg_vr, avg_stride = round(avg_vr, 1), round(avg_stride, 2)
+            form_scope = "work_reps"
+    if _tag_match:
+        session_type = _zone_to_type[_tag_match.group(1)]
 
     # --- Garmin-native assessment (Plan A Tier 1) ---
     # Fields live in 3 places depending on which API returned them:
@@ -292,6 +350,7 @@ def analyze(data):
 
     return {
         "session_type": session_type,
+        "form_scope": form_scope,
         "duration_sec": dur_sec,
         "avg_hr": avg_hr,
         "max_hr": max_hr,
@@ -422,7 +481,17 @@ def flag_issues(r):
 # BB drain helper
 # ---------------------------------------------------------------------------
 def get_bb_drain(client, date_str, start_str, duration_sec):
+    """Return (bb_start, bb_end) sampled as close as possible to the run's
+    actual start/end times. Garmin's bodyBatteryValuesArray is sometimes
+    very sparse (as few as 5-6 points/day if the watch isn't tracking
+    continuously) — matching to whatever's nearest without a distance check
+    can silently pair a point hours away from the run (e.g. that morning's
+    BB, or that evening's) and report a huge "drain" that's really just the
+    rest of the day's normal drift, not the run. Discard any match more
+    than BB_MATCH_MAX_GAP_MS away rather than use a stale value unflagged.
+    """
     from datetime import timedelta
+    BB_MATCH_MAX_GAP_MS = 20 * 60 * 1000  # 20min — beyond this, don't trust the match
     try:
         bb_data = client.get_body_battery(date_str, date_str)
         if not bb_data or not isinstance(bb_data, list):
@@ -439,14 +508,14 @@ def get_bb_drain(client, date_str, start_str, duration_sec):
         bb_start = bb_end = None
         for v in reversed(vals):
             if v[0] <= start_ms:
-                bb_start = int(v[1])
+                if start_ms - v[0] <= BB_MATCH_MAX_GAP_MS:
+                    bb_start = int(v[1])
                 break
         for v in vals:
             if v[0] >= end_ms:
-                bb_end = int(v[1])
+                if v[0] - end_ms <= BB_MATCH_MAX_GAP_MS:
+                    bb_end = int(v[1])
                 break
-        if bb_end is None and vals:
-            bb_end = int(vals[-1][1])
         return bb_start, bb_end
     except Exception:
         return None, None
@@ -484,9 +553,30 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
     cur = None  # current rep buffer
     rep_n = 0
 
+    # Some workouts (seen on structured-workout pushes) tag every lap
+    # "INTERVAL" with no WARMUP/RECOVERY/COOLDOWN at all — the jog-recovery
+    # laps between reps are still there, just mistagged as INTERVAL like the
+    # work laps. Left alone, the pre-pass below can misfile a slow recovery
+    # lap as a "stride" (short + followed by another ACTIVE lap), and reps
+    # split by GPS/distance auto-lap (e.g. one 8min rep crossing a 1km mark)
+    # get counted as separate reps instead of one. Use PACE, not just
+    # duration/tag, to tell recovery jogs and true reps apart.
+    try:
+        from config import VDOT_PACES as _VP
+        _fast_thresh = _VP["M"][1]   # slower than this -> not a stride candidate
+        _slow_thresh = _VP["E"][1]   # slower than this -> definitely a recovery jog
+    except Exception:
+        _fast_thresh, _slow_thresh = 325, 404  # VDOT-40 fallback (M-slow, E-slow)
+
+    def _lap_pace_sec_km(lap):
+        dist_km = (lap.get("distance") or 0) / 1000
+        dur = lap.get("duration") or 0
+        return (dur / dist_km) if dist_km > 0.01 else None
+
     # Pre-pass: reclassify short ACTIVE laps as STRIDE when:
     #   - duration < 180s
     #   - NOT followed by RECOVERY/REST (i.e. they precede a real rep)
+    #   - pace is actually fast (rules out a short slow recovery-jog lap)
     laps = list(laps)
     for i, lap in enumerate(laps):
         t = (lap.get("intensityType") or "ACTIVE").upper()
@@ -494,9 +584,15 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
             dur = lap.get("duration") or 0
             nxt = laps[i + 1] if i + 1 < len(laps) else None
             nxt_t = (nxt.get("intensityType") or "").upper() if nxt else ""
-            # short ACTIVE + next is ACTIVE (not recovery) → stride/lead-in
-            if dur < 180 and nxt_t in ("ACTIVE", "INTERVAL"):
+            pace = _lap_pace_sec_km(lap)
+            is_fast = pace is not None and pace <= _fast_thresh
+            # short ACTIVE + next is ACTIVE (not recovery) + fast pace → stride/lead-in
+            if dur < 180 and nxt_t in ("ACTIVE", "INTERVAL") and is_fast:
                 lap["_reclassified"] = "STRIDE"
+            # slow pace regardless of duration/tag → this is a jog recovery,
+            # mistagged as INTERVAL/ACTIVE by the watch
+            elif pace is not None and pace >= _slow_thresh:
+                lap["_reclassified"] = "RECOVERY"
 
     def _close(buf):
         if not buf or buf["dist_km"] <= 0.05:
@@ -507,6 +603,16 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
         avg_hr = weighted_hr / total_t if total_t > 0 else 0
         max_hr = max((l.get("maxHR") or l.get("averageHR") or 0) for l in buf["_laps"])
         pace = (buf["duration_s"] / 60) / buf["dist_km"] if buf["dist_km"] > 0 else 0
+
+        def _wavg(field):
+            vals = [(l.get(field) or 0) * l["duration"] for l in buf["_laps"]]
+            return sum(vals) / total_t if total_t > 0 else 0
+
+        avg_cadence = _wavg("averageRunCadence")
+        avg_power   = _wavg("averagePower")
+        avg_gct     = _wavg("groundContactTime")
+        avg_vr      = _wavg("verticalRatio")
+        avg_stride  = _wavg("strideLength") / 100  # cm → m
         # Garmin TM lap pace unreliable — recompute from averageSpeed if available
         if is_treadmill:
             spds = [l.get("averageSpeed") or 0 for l in buf["_laps"]]
@@ -518,6 +624,11 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
             "avg_hr": round(avg_hr, 1),
             "max_hr": int(max_hr) if max_hr else 0,
             "pace_min_km": round(pace, 3),
+            "avg_cadence": round(avg_cadence),
+            "avg_power": round(avg_power),
+            "avg_gct": round(avg_gct),
+            "avg_vr": round(avg_vr, 1),
+            "avg_stride": round(avg_stride, 2),
         })
         del buf["_laps"]
         reps.append(buf)
@@ -526,6 +637,8 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
         t = (lap.get("intensityType") or "ACTIVE").upper()
         if lap.get("_reclassified") == "STRIDE":
             t = "STRIDE"
+        elif lap.get("_reclassified") == "RECOVERY":
+            t = "RECOVERY"
         d = (lap.get("distance") or 0) / 1000
         dur = lap.get("duration") or 0
         if t == "WARMUP":
@@ -591,10 +704,11 @@ def print_lap_analysis(lap_data: dict, is_treadmill: bool, has_override: bool = 
     else:
         tm_tag = ""
 
-    print(f"\n{'─'*55}")
+    print(f"\n{'─'*68}")
     print(f"🔁 PER-REP ANALYSIS — {lap_data['structure']}{tm_tag}")
-    print(f"{'─'*55}")
-    print(f"  {'Rep':<5}{'Dist':<8}{'Time':<8}{'Pace':<10}{'avgHR':<8}{'maxHR':<8}{'Δ HR':<8}")
+    print(f"{'─'*68}")
+    print(f"  {'Rep':<5}{'Dist':<8}{'Time':<8}{'Pace':<10}{'avgHR':<8}{'maxHR':<8}{'Δ HR':<8}"
+          f"{'Cad':<6}{'Pwr':<6}{'GCT':<6}")
     base_hr = reps[0]["avg_hr"] if reps else 0
     for rep in reps:
         pm = int(rep["pace_min_km"])
@@ -606,7 +720,8 @@ def print_lap_analysis(lap_data: dict, is_treadmill: bool, has_override: bool = 
         delta = rep["avg_hr"] - base_hr
         delta_str = f"{delta:+.1f}" if rep["n"] > 1 else "—"
         print(f"  {rep['n']:<5}{rep['dist_km']:<8.2f}{time_str:<8}"
-              f"{pace_str:<10}{rep['avg_hr']:<8.1f}{rep['max_hr']:<8}{delta_str:<8}")
+              f"{pace_str:<10}{rep['avg_hr']:<8.1f}{rep['max_hr']:<8}{delta_str:<8}"
+              f"{rep.get('avg_cadence', 0):<6}{rep.get('avg_power', 0):<6}{rep.get('avg_gct', 0):<6}")
 
     if recs:
         avg_rec = sum(r["duration_s"] for r in recs) / len(recs)
@@ -640,7 +755,7 @@ def print_report(act_id, date_str, r):
     dc_emoji = "✅" if dc is not None and dc <= 5 else ("🟡" if dc is not None and dc <= 10 else "🔴")
 
     stam_str = f"{r['stam_start']}% → {r['stam_end']}%" if r["stam_start"] else "N/A"
-    bb_str   = f"{r.get('bb_start', 'N/A')} → {r.get('bb_end', 'N/A')}"
+    bb_str   = f"{r.get('bb_start') if r.get('bb_start') is not None else 'N/A'} → {r.get('bb_end') if r.get('bb_end') is not None else 'N/A'}"
 
     if r.get("bb_start") and r.get("bb_end"):
         bb_drain = r["bb_start"] - r["bb_end"]
@@ -654,6 +769,7 @@ def print_report(act_id, date_str, r):
     treadmill_tag = " (Treadmill 🏃‍♂️)" if r.get("is_treadmill") else ""
     vr_str     = f"{r['vr']}%" if r["vr"] else "N/A"
     stride_str = f"{r['stride']}m" if r["stride"] else "N/A"
+    form_scope_tag = "  (work reps only)" if r.get("form_scope") == "work_reps" else "  (whole session)"
     is_easy    = r["session_type"] == "Easy Run"
 
     print(f"""
@@ -670,7 +786,7 @@ def print_report(act_id, date_str, r):
 📊 Zone Distribution:
    Z1(E): {z[0]}%  Z2(M): {z[1]}%  Z3(T): {z[2]}%  Z4(I): {z[3]}%  Z5(R): {z[4]}%
 
-🦵 Cadence: {r['cadence']} spm  |  GCT: {r['gct']}ms  |  Stride: {stride_str}
+🦵 Cadence: {r['cadence']} spm  |  GCT: {r['gct']}ms  |  Stride: {stride_str}{form_scope_tag}
 📈 Power: {r['power']}W  |  Vertical Ratio: {vr_str}
 📉 Stamina: {stam_str}
 🔋 Body Battery: {bb_str}""")
@@ -981,8 +1097,10 @@ def log_session(act_id, date_str, r):
         entry["quality_pct"]       = effective_stats.get("quality_pct")
 
     log["sessions"].append(entry)
-    # Keep sorted by date descending
-    log["sessions"].sort(key=lambda s: s["date"], reverse=True)
+    # Sort by activity_id (monotonic with time), not date-string — avoids
+    # a non-ISO "date" value sorting above real dates and pinning a stale
+    # session at index 0 (see stamina_patcher.py / session_logger.py).
+    log["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
     save_session_log(log)
     print(f"✅ Session logged → {SESSION_LOG_PATH}")
 
@@ -1039,15 +1157,42 @@ def main():
     r["_rep_speeds_override"] = rep_speeds
     print_report(act_id, report_date, r)
 
+    # Long Run (>=14km) → show Energy Efficiency Score inline so it never
+    # depends on remembering to run energy_efficiency_scorer.py separately.
+    s = (data.get("_activitySummary") or {}).get("summaryDTO", {})
+    dist_m = data.get("distance") or s.get("distance") or 0
+    total_km = round(dist_m / 1000, 2)
+    if total_km >= 14.0 and r.get("stam_start") and r.get("stam_end") and r.get("bb_start") and r.get("bb_end"):
+        try:
+            from energy_efficiency_scorer import _efficiency_score, _score_label
+            stamina_drain_pct = r["stam_start"] - r["stam_end"]
+            bb_drop = r["bb_start"] - r["bb_end"]
+            score = _efficiency_score(stamina_drain_pct, bb_drop)
+            print(f"\n⚡ ENERGY EFFICIENCY: {score}  {_score_label(score)}"
+                  f"  (stamina retained/BB unit — {total_km}km long run)")
+        except Exception as e:
+            print(f"\n⚠️  Energy efficiency score unavailable ({e})")
+
     if args.update_log:
         log_session(act_id, report_date, r)
 
-    # Auto-log to sessions_master.json
-    try:
-        from session_logger import auto_log
-        auto_log(act_id, data, r, report_date)
-    except Exception:
-        pass
+    # Auto-log to sessions_master.json — unconditional for Easy Run (matches
+    # run_post_easy.sh, which intentionally never passes --update-log since
+    # easy runs never belong in sessions.json / VDOT tracking at all). For
+    # every other (quality) type, require --update-log so it can't write
+    # sessions_master.json without the matching sessions.json entry from
+    # log_session() above — see CLAUDE.md's single-source-of-truth policy.
+    # Previously this ran unconditionally for every session type, so an
+    # ad-hoc "just check this run" call on a QUALITY session silently wrote
+    # sessions_master.json without sessions.json, causing 3+ weeks of drift
+    # (vdot_estimator/race_predictor/skill_sync all read sessions.json only).
+    is_easy_session = r.get("session_type") == "Easy Run"
+    if is_easy_session or args.update_log:
+        try:
+            from session_logger import auto_log
+            auto_log(act_id, data, r, report_date)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

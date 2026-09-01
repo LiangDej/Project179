@@ -20,13 +20,18 @@ echo "▶ Step 0 — Sync Activities + Wellness"
 "$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_wellness.py"
 
 # ── Post-session analysis → sessions_master.json ───────────────────────────
+# post_session_analyzer.py auto_log() prompts interactively (Y/n type/lap
+# roles). It's wrapped in a silent try/except, so with no input it used to
+# just skip logging with no error. Feed "Y" + blank lines (Enter=keep) so
+# it actually logs when run unattended.
+AUTO_ANSWERS="Y$(printf '\n%.0s' {1..50})"
 echo ""
 if [ -n "${1:-}" ]; then
   echo "📌 Activity ID: $1"
-  "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --id "${1:-}"
+  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --id "${1:-}"
 else
   echo "📌 Latest activity"
-  "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest
+  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest
 fi
 
 # ── Auto-patch stamina_drain_pct → sessions_master.json ────────────────────

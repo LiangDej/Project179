@@ -440,9 +440,9 @@ def main():
     parser.add_argument("--hrv",   default="unknown",
                         choices=["balanced", "unbalanced", "unknown"],
                         help="HRV status วันนี้")
-    parser.add_argument("--pain",  default="none",
+    parser.add_argument("--pain",  default=ATHLETE.get("pain_status", "none"),
                         choices=["none", "mild", "moderate"],
-                        help="Pain level")
+                        help="Pain level — defaults to athlete.json → pain_status")
     parser.add_argument("--json",  action="store_true", help="Output JSON")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -453,7 +453,12 @@ def main():
     if bb is None or hrv == "unknown":
         cached = _get_health_from_cache()
         if bb is None:
-            bb = cached.get("body_battery")
+            # Morning peak (bb_high), not the current/drifted body_battery —
+            # readiness decisions must use the day's peak, same fix as
+            # daily_brief.py. Otherwise running this tool in the evening
+            # (BB already drained from the day) wrongly reads as low-BB and
+            # downgrades tomorrow's plan off a stale, already-spent number.
+            bb = cached.get("bb_high") if cached.get("bb_high") is not None else cached.get("body_battery")
         if hrv == "unknown":
             hrv = cached.get("hrv_status", "unknown").lower()
 
