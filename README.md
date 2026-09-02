@@ -10,15 +10,16 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 
 ## Compatible AI Agents
 
-| Agent | วิธีเชื่อม |
-|---|---|
-| **Custom agent (recommended)** | clone repo, ตั้ง `PYTHONPATH=skills/garmin_coach_mcp`, รัน tools ผ่าน bash — วิธีนี้ self-contained ที่สุด ไม่ต้องพึ่งอะไรนอก repo นี้ |
-| **ChatGPT** (Code Interpreter) | upload `athlete.json` + `races.json` แล้วคุยได้เลย |
-| **Gemini** (file browsing / Colab) | ชี้ไปที่ project folder หรือ paste tool output |
-| **Cursor / GitHub Copilot** | เปิด repo ใน IDE — agent อ่าน README เป็น context |
-| **Claude Code / Cowork** | เปิด project folder — agent รัน tools ผ่าน bash เหมือน custom agent ได้ทันที (ไม่ต้องมี MCP server) |
+| Agent | Live Garmin data? | วิธีเชื่อม |
+|---|---|---|
+| **Custom agent (recommended)** | ✅ ครบ | clone repo, ตั้ง `PYTHONPATH=skills/garmin_coach_mcp`, รัน tools ผ่าน bash — self-contained ที่สุด ไม่ต้องพึ่งอะไรนอก repo นี้ |
+| **Claude Code / Cowork** | ✅ ครบ | เปิด project folder — agent รัน tools ผ่าน bash เหมือน custom agent ได้ทันที (ไม่ต้องมี MCP server) |
+| **Gemini ผ่าน Google Colab** | ✅ ครบ | Colab มี internet + pip install ได้จริง — `!git clone`, ตั้ง credentials, ดึง Garmin สดได้เหมือน custom agent |
+| **Cursor / GitHub Copilot** | ✅ ครบ | เปิด repo ใน IDE (รันบนเครื่องจริง มี internet ปกติ) — agent อ่าน README เป็น context |
+| **ChatGPT** (Code Interpreter) | ❌ **ไม่ได้** | sandbox ของ Code Interpreter **ไม่มี internet เลย** — เรียก Garmin Connect API / OpenWeather ไม่ได้ ดังนั้น `daily_brief.py`, `post_session_analyzer.py`, `hrv_trend.py` และ feature ที่ต้องดึงข้อมูลสดใช้ไม่ได้ |
+| **Gemini app เฉยๆ** (ไม่ผ่าน Colab) | ❌ **ไม่ได้** | เหตุผลเดียวกับ ChatGPT — ไม่มี code execution ที่ออก internet ได้ |
 
-> agent ไหนก็ได้ที่อ่านไฟล์และรัน `python3` ได้ — ใช้เป็น coach ได้ทันที ไม่ต้อง MCP server เลย
+> **ChatGPT/Gemini-app ยังพอใช้แบบจำกัดได้:** upload ไฟล์ `.py` ของ tool ที่เป็น pure calculator (ไม่ง้อ live data) เช่น `nutrition_calculator.py`, `race_pace_planner.py`, `training_planner.py`, `vdot_math.py` พร้อม `athlete.json`/`races.json` แล้วพิมพ์ input เอง (เช่น `--temp 27 --humidity 82`) — คำนวณได้ปกติ แต่จะไม่มีทาง "ดึงข้อมูล Garmin จริงมาวิเคราะห์" ได้เลยบน 2 platform นี้
 >
 > **หมายเหตุเรื่อง MCP:** `skills/garmin_coach_mcp/` ใน repo นี้มีแค่ `config.py`/`db_helper.py` (โค้ดคำนวณ zones/paces ที่ tools ทุกตัวใช้ร่วมกัน) — **ไม่ใช่** FastMCP server ตัวเต็ม (server จริงรันแยกอยู่คนละ repo ส่วนตัว, ยังไม่ public) ถ้า agent ของคุณรองรับแค่ MCP tools โดยเฉพาะ ให้ใช้เส้นทาง "รัน tools ผ่าน bash" แทน — เป็นเส้นทางที่ทำได้ครบทุกอย่างและเป็น path หลักที่ repo นี้ทดสอบไว้
 

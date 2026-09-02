@@ -10,15 +10,16 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 
 ## Compatible AI Agents
 
-| Agent | How to connect |
-|---|---|
-| **Custom agent (recommended)** | Clone repo, set `PYTHONPATH=skills/garmin_coach_mcp`, run tools via bash — the most self-contained path, no external dependency beyond this repo |
-| **ChatGPT** (Code Interpreter) | Upload `athlete.json` + `races.json` and start chatting |
-| **Gemini** (file browsing / Colab) | Point to project folder or paste tool output |
-| **Cursor / GitHub Copilot** | Open repo in IDE — agent reads README as context |
-| **Claude Code / Cowork** | Open project folder — agent runs tools via bash just like a custom agent, no MCP server needed |
+| Agent | Live Garmin data? | How to connect |
+|---|---|---|
+| **Custom agent (recommended)** | ✅ Full | Clone repo, set `PYTHONPATH=skills/garmin_coach_mcp`, run tools via bash — the most self-contained path |
+| **Claude Code / Cowork** | ✅ Full | Open project folder — agent runs tools via bash just like a custom agent, no MCP server needed |
+| **Gemini via Google Colab** | ✅ Full | Colab has real internet + pip install — `!git clone`, set credentials, pull live Garmin data just like a custom agent |
+| **Cursor / GitHub Copilot** | ✅ Full | Open repo in IDE (runs on your real machine, normal internet access) — agent reads README as context |
+| **ChatGPT** (Code Interpreter) | ❌ **No** | Code Interpreter's sandbox has **no internet access** — it cannot call the Garmin Connect API or OpenWeather, so `daily_brief.py`, `post_session_analyzer.py`, `hrv_trend.py`, and anything needing live data won't work |
+| **Gemini app** (not via Colab) | ❌ **No** | Same reason as ChatGPT — no code execution path that reaches the internet |
 
-> Any agent that can read files and run `python3` can act as your coach immediately — no MCP server required.
+> **ChatGPT/the Gemini app still work in a limited way:** upload the `.py` files for pure-calculator tools that don't need live data — `nutrition_calculator.py`, `race_pace_planner.py`, `training_planner.py`, `vdot_math.py` — along with `athlete.json`/`races.json`, and type inputs manually (e.g. `--temp 27 --humidity 82`). Calculations work fine; you just can't pull real Garmin data on either platform.
 >
 > **A note on MCP:** `skills/garmin_coach_mcp/` in this repo only contains `config.py`/`db_helper.py` (the shared zone/pace calculation logic every tool imports) — it is **not** a full FastMCP server (the real server runs in a separate, still-private repo). If your agent only speaks MCP tool calls, use the "run tools via bash" path instead — it covers everything and is the path this repo actually tests.
 
