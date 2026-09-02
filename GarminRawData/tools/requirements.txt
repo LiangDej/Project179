@@ -1,3 +1,7 @@
+# Minimal subset for running GarminRawData/tools/*.py directly (no MCP
+# server, no cloud extras). The root-level requirements.txt is the
+# authoritative/full set used by README setup + CI — install that one
+# unless you specifically want this lighter, tools-only install.
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0

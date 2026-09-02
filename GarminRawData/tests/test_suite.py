@@ -273,7 +273,31 @@ def functional_tests():
 
 
 # ===========================================================================
+def _require_athlete_data():
+    """Friendly early-exit if athlete.json / races.json haven't been created yet
+    (fresh clone ships only the .example.json templates)."""
+    missing = [p.name for p in
+               (ROOT / "GarminRawData" / "athlete.json", ROOT / "GarminRawData" / "races.json")
+               if not p.exists()]
+    if missing:
+        print("=" * 60)
+        print("🧪 PROJECT 179 — TEST SUITE")
+        print("=" * 60)
+        print(f"❌ Missing: {', '.join(missing)}")
+        print()
+        print("This is a fresh clone — the test suite needs your own athlete/race")
+        print("data to run (it checks that every tool agrees with it).")
+        print()
+        print("Fix:")
+        for name in missing:
+            print(f"  cp GarminRawData/{name.replace('.json', '.example.json')} GarminRawData/{name}")
+        print("  # then fill in your VDOT/LTHR/race targets, and re-run this suite")
+        print("=" * 60)
+        sys.exit(1)
+
+
 def main():
+    _require_athlete_data()
     print("=" * 60)
     print("🧪 PROJECT 179 — TEST SUITE")
     print("=" * 60)

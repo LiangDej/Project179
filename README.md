@@ -3,6 +3,8 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
+![Version](https://img.shields.io/badge/version-1.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
@@ -10,13 +12,15 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 
 | Agent | วิธีเชื่อม |
 |---|---|
-| **Claude Code / Cowork** | เปิด project folder — agent อ่าน tools + data อัตโนมัติ |
+| **Custom agent (recommended)** | clone repo, ตั้ง `PYTHONPATH=skills/garmin_coach_mcp`, รัน tools ผ่าน bash — วิธีนี้ self-contained ที่สุด ไม่ต้องพึ่งอะไรนอก repo นี้ |
 | **ChatGPT** (Code Interpreter) | upload `athlete.json` + `races.json` แล้วคุยได้เลย |
 | **Gemini** (file browsing / Colab) | ชี้ไปที่ project folder หรือ paste tool output |
 | **Cursor / GitHub Copilot** | เปิด repo ใน IDE — agent อ่าน README เป็น context |
-| **Custom agent** | clone repo, ตั้ง `PYTHONPATH=skills/garmin_coach_mcp`, รัน tools ผ่าน bash |
+| **Claude Code / Cowork** | เปิด project folder — agent รัน tools ผ่าน bash เหมือน custom agent ได้ทันที (ไม่ต้องมี MCP server) |
 
-> agent ไหนก็ได้ที่อ่านไฟล์และรัน `python3` ได้ — ใช้เป็น coach ได้ทันที
+> agent ไหนก็ได้ที่อ่านไฟล์และรัน `python3` ได้ — ใช้เป็น coach ได้ทันที ไม่ต้อง MCP server เลย
+>
+> **หมายเหตุเรื่อง MCP:** `skills/garmin_coach_mcp/` ใน repo นี้มีแค่ `config.py`/`db_helper.py` (โค้ดคำนวณ zones/paces ที่ tools ทุกตัวใช้ร่วมกัน) — **ไม่ใช่** FastMCP server ตัวเต็ม (server จริงรันแยกอยู่คนละ repo ส่วนตัว, ยังไม่ public) ถ้า agent ของคุณรองรับแค่ MCP tools โดยเฉพาะ ให้ใช้เส้นทาง "รัน tools ผ่าน bash" แทน — เป็นเส้นทางที่ทำได้ครบทุกอย่างและเป็น path หลักที่ repo นี้ทดสอบไว้
 
 ---
 
@@ -376,11 +380,13 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 # 30 checks: UNIT + CONSISTENCY + FUNCTIONAL — exit 0 = all green
 ```
 
-**Protected files** — do not edit directly, only via data files:
+**Protected files** (convention for AI coding assistants during a live coaching session — see [CLAUDE.md](CLAUDE.md) — human contributors should open a PR as normal):
 - `GarminRawData/tools/*.py` (all 35 tools)
 - `skills/garmin_coach_mcp/config.py` + `db_helper.py`
 
 CI runs automatically on every push via GitHub Actions.
+
+Two `requirements.txt` files exist: the **root one is authoritative** (full set, used by CI + setup step 1); `GarminRawData/tools/requirements.txt` is a lighter subset for the tools-only path.
 
 ---
 
@@ -401,3 +407,11 @@ Project นี้เป็น **เครื่องมือช่วยวา
 - ถ้ามีอาการเจ็บ ปวด หรือผิดปกติระหว่างซ้อม ให้หยุดและปรึกษาแพทย์/นักกายภาพก่อนเสมอ
 - ตัวเลข VDOT/HR zones ควรยืนยันจากผลแข่งหรือ Time Trial จริง ไม่ใช่ใช้ค่าประเมินไปตัดสินใจเรื่องสุขภาพ
 - ผู้ใช้เป็นผู้รับผิดชอบการตัดสินใจซ้อม/แข่งขันของตัวเองทั้งหมด
+
+---
+
+## License
+
+[MIT](LICENSE) — free to use, modify, and redistribute, with attribution.
+
+*[Read this in English →](README_EN.md)*
