@@ -1,6 +1,14 @@
 # PROJECT 179 — Cowork & Claude Code Instructions
 
-## ⚠️ FILE PROTECTION — READ BEFORE ANY ACTION
+> **Note for human contributors:** the section below is written for *AI coding
+> assistants* (Claude Code, Cowork, etc.) reading this file during a live
+> coaching session — it tells the assistant to ask before touching tool code,
+> so a chat request like "fix my pace" can't accidentally rewrite `daily_brief.py`.
+> It is **not** a rule against human pull requests. If you're a person wanting
+> to fix a bug or add a tool, go ahead and open a PR normally — this file just
+> keeps an AI assistant from doing it unsupervised mid-conversation.
+
+## ⚠️ FILE PROTECTION — READ BEFORE ANY ACTION (applies to AI assistants)
 
 **ALL Python files in `GarminRawData/tools/` are PROTECTED**, plus the MCP server/config. These are **managed by the system architect** and must **NEVER be modified, overwritten, or recreated** during coaching sessions — including any *new* tool added to the directory in the future.
 

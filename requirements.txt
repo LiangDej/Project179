@@ -1,3 +1,9 @@
+# Full dependency set — install this one (README setup step 1, and CI).
+# Covers the plain-Python coaching tools (GarminRawData/tools/) plus optional
+# server-side extras (FastMCP, Google Cloud, Telegram bot) used by the
+# separate MCP-server deployment. If you only want the tools/CLI path and
+# want a lighter install, GarminRawData/tools/requirements.txt is a subset
+# of this file with just what the tools themselves import.
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0
