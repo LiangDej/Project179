@@ -38,9 +38,11 @@ python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 ```bash
 mkdir -p ~/.config/garmin-coach
-echo 'GARMIN_EMAIL=your@email.com'  >> ~/.config/garmin-coach/.env
-echo 'GARMIN_PASSWORD=yourpassword' >> ~/.config/garmin-coach/.env
+echo 'GARMIN_USERNAME=your@email.com' >> ~/.config/garmin-coach/.env
+echo 'GARMIN_PASSWORD=yourpassword'   >> ~/.config/garmin-coach/.env
 ```
+
+(the variable is named `GARMIN_USERNAME` even though the value is your email — see [`.env.example`](.env.example))
 
 ### 3 · Paste this prompt to your AI agent (that's it)
 

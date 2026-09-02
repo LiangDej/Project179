@@ -13,7 +13,7 @@ Setup:
     Get free key at https://openweathermap.org/api
 """
 import sys, os, json, math, argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
 _mcp = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "skills", "garmin_coach_mcp"))
@@ -342,7 +342,7 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
     else:
         try:
             from vdot_math import predict_race_time
-            hm_min = predict_race_time(vdot, 21097)
+            hm_min = predict_race_time(ATHLETE["vdot"], 21097)
             base_hm_pace = hm_min * 60 / 21.097
         except Exception:
             base_hm_pace = (VDOT_PACES["M"][0] + VDOT_PACES["T"][1]) / 2
@@ -371,7 +371,7 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
     try:
         from nutrition_calculator import (sweat_rate_lhr, sweat_na_mgl,
                                           na_requirement, RACE_CONFIG, plan_caps)
-        rc = RACE_CONFIG.get(race, RACE_CONFIG["hm"])
+        rc = RACE_CONFIG[race]
         duration_min = rc["default_duration_min"]
         sr, _, _ = sweat_rate_lhr(temp, humidity)
         na_loss = sr * duration_min / 60 * sweat_na_mgl()
