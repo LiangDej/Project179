@@ -427,9 +427,11 @@ def print_plan(plan: dict):
         if s.get('nutrition'):
             print(f"   💊 {s['nutrition']}")
 
-    print(f"\n{'='*57}")
-    print("⚕️  Injury Check ทุกวัน: Popliteus + Hamstring ขวา ก่อนวิ่ง")
-    print(f"{'='*57}\n")
+    pain = plan['readiness'].get('pain', 'none')
+    if pain and pain != "none":
+        print(f"\n{'='*57}")
+        print(f"⚕️  Injury Check ทุกวัน: pain_status = {pain} (athlete.json) — เช็คจุดที่เจ็บก่อนวิ่งทุกครั้ง")
+        print(f"{'='*57}\n")
 
 
 def main():
