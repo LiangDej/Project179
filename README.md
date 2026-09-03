@@ -52,21 +52,31 @@ I just cloned Project 179 — Garmin JD Running Coach.
 Please set me up as a new athlete. Ask me the following one by one:
 
 1. PB ของแต่ละระยะที่มี (5K / 10K / Half Marathon / Full Marathon) — ใส่เฉพาะระยะที่เคยแข่งจริง
-2. เป้าหมายแข่งหลัก (A-race): ระยะ, ชื่องาน, วันที่, เวลาเป้าหมาย
-3. มี B-race (tune-up) ไหม? ถ้ามี: ระยะ, วันที่
-4. น้ำหนักตัว (kg) — ใช้คำนวณ nutrition
-5. วิ่ง treadmill หรือ outdoor เป็นหลัก?
-6. electrolyte ที่ใช้อยู่คืออะไร? (ถ้าไม่มี บอกว่าไม่มี)
+2. LTHR (Lactate Threshold HR) — ถ้าเคยทำ field test (เช่น Friel 30-min TT) มาก่อนบอกค่าได้เลย
+   ถ้าไม่เคยทำ บอกว่า "ไม่มี" — ห้ามเดาหรือปล่อยเป็นค่า default จากไฟล์ตัวอย่าง
+3. Resting HR (ตอนเช้าก่อนลุกจากเตียง) และ Max HR ที่เคยวัดได้จริง (จาก interval หนักๆ หรือ hill sprint)
+   — จำเป็นมาก ถ้าใช้ default ของคนอื่นอาจสั่ง HR zone ที่เกินตัวจริงและอันตราย
+4. น้ำหนักตัว (kg) และอายุ — ใช้คำนวณ nutrition และเป็น fallback ประเมิน MHR คร่าวๆถ้าไม่มีค่าจริง
+5. ซ้อมกี่วัน/สัปดาห์? วันไหนพักเต็มวัน (ไม่ซ้อมอะไรเลย)? มีวันเวท/strength ไหม วันไหน?
+6. มีอาการบาดเจ็บหรือจุดที่ต้องระวังตอนนี้ไหม? (ถ้าไม่มี บอกว่า "none" — ห้ามคัดลอกจุดเจ็บจากตัวอย่างใดๆ มาใส่)
+7. เป้าหมายแข่งหลัก (A-race): ระยะ, ชื่องาน, วันที่, เวลาเป้าหมาย
+8. มี B-race (tune-up) ไหม? ถ้ามี: ระยะ, วันที่
+9. วิ่ง treadmill หรือ outdoor เป็นหลัก?
+10. ระหว่างซ้อม/แข่งกินเกลือแร่หรือเจลไหม? ถ้ามี บอกยี่ห้อ + Na/carb ต่อหน่วยจากฉลาก (ถ้าไม่รู้ตัวเลขให้เช็คฉลากมาก่อน)
+    ถ้าไม่กินอะไรเลย บอกว่า "ไม่มี" ชัดเจน — ห้ามปล่อย placeholder text จากไฟล์ตัวอย่างค้างไว้
 
 จาก PB ที่ได้ ให้ประเมิน VDOT เบื้องต้น แล้วบอกว่า VDOT นี้สมเหตุสมผลกับ PB ทุกระยะไหม
 (เช่น 5K บอก VDOT 44 แต่ FM บอก VDOT 38 → ไม่ consistent → ควรเชื่อระยะไหน)
 จากนั้นแนะนำ TT แรกที่ควรวิ่ง (ระยะ + เป้า) เพื่อยืนยัน VDOT ก่อน lock training zones
 
 เมื่อได้ข้อมูลครบ ให้ copy athlete.example.json → athlete.json และ races.example.json → races.json
-แล้ว update ค่าทั้งหมดให้ถูกต้อง จากนั้นรัน test suite ยืนยัน
+แล้ว **overwrite ทุก field ที่เกี่ยวข้องด้วยคำตอบจริงของฉัน — ไม่เหลือ default/placeholder จากไฟล์ตัวอย่างค้างไว้แม้แต่ field เดียว**
+(รวมถึง pain_status, training_days_per_week, rest_days, strength_day,
+quality_nutrition/race_day_nutrition/long_run_nutrition — เขียนคำตอบจริงหรือ "none"/"not used" ทับให้หมด)
+จากนั้นรัน test suite ยืนยัน
 ```
 
-agent จะถามทีละข้อ → เขียนไฟล์ให้ → รัน test suite → แจ้งผล — **คุณไม่ต้องแตะไฟล์เลย**
+agent จะถามทีละข้อ → เขียนไฟล์ให้ครบทุก field (ไม่ทิ้งค่า default ของคนอื่นไว้เลย) → รัน test suite → แจ้งผล — **คุณไม่ต้องแตะไฟล์เลย**
 
 ---
 
