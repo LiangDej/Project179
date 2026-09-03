@@ -573,6 +573,21 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
         dur = lap.get("duration") or 0
         return (dur / dist_km) if dist_km > 0.01 else None
 
+    # Reference work-pace: some sessions (e.g. a treadmill interval with the
+    # recovery jog set to a brisk ~9km/h, not a slow shuffle) have recovery
+    # laps that are still faster than VDOT_PACES["E"]'s slow end — the
+    # absolute _slow_thresh check below misses those entirely, so every lap
+    # stays tagged INTERVAL and analyze_laps() can't split reps from
+    # recovery, which then makes the caller fall back to whole-session
+    # avg HR/pace and misclassify the whole thing as an Easy run. Fix: also
+    # flag a lap as recovery when it's meaningfully slower (>=15%) than the
+    # session's own fast-lap (work-rep) pace, not just slower than a fixed
+    # VDOT-derived floor.
+    _fast_lap_paces = [p for p in (_lap_pace_sec_km(l) for l in laps)
+                        if p is not None and p <= _fast_thresh]
+    _work_pace_ref = (sum(_fast_lap_paces) / len(_fast_lap_paces)
+                       if _fast_lap_paces else None)
+
     # Pre-pass: reclassify short ACTIVE laps as STRIDE when:
     #   - duration < 180s
     #   - NOT followed by RECOVERY/REST (i.e. they precede a real rep)
@@ -589,9 +604,13 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
             # short ACTIVE + next is ACTIVE (not recovery) + fast pace → stride/lead-in
             if dur < 180 and nxt_t in ("ACTIVE", "INTERVAL") and is_fast:
                 lap["_reclassified"] = "STRIDE"
-            # slow pace regardless of duration/tag → this is a jog recovery,
-            # mistagged as INTERVAL/ACTIVE by the watch
-            elif pace is not None and pace >= _slow_thresh:
+            # slow vs a fixed VDOT floor, OR meaningfully slower than this
+            # session's own work-rep pace → jog recovery, mistagged as
+            # INTERVAL/ACTIVE by the watch
+            elif pace is not None and (
+                pace >= _slow_thresh
+                or (_work_pace_ref is not None and pace >= _work_pace_ref * 1.15)
+            ):
                 lap["_reclassified"] = "RECOVERY"
 
     def _close(buf):
