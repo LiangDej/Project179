@@ -336,25 +336,39 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
     mhr = ATHLETE["mhr"]
     hrr = ATHLETE["hrr"]
 
+    # Actual race distance (km) from race_registry — was hardcoded to 21.097
+    # (half-marathon) everywhere below, so a marathon (e.g. --race bangsaen,
+    # 42.195km) silently got HM-distance pace prediction AND a segment plan
+    # that stopped at km 21, leaving the back half of the race with no plan
+    # at all. Look it up once here and use it for both.
+    try:
+        from race_registry import load_races
+        dist_km = load_races()[race]["dist_km"]
+    except Exception:
+        dist_km = 21.097
+
     # Base race pace — prefer user input, fallback to vdot_math
     if base_pace_str:
         base_hm_pace = parse_pace(base_pace_str)
     else:
         try:
             from vdot_math import predict_race_time
-            hm_min = predict_race_time(ATHLETE["vdot"], 21097)
-            base_hm_pace = hm_min * 60 / 21.097
+            race_min = predict_race_time(ATHLETE["vdot"], dist_km * 1000)
+            base_hm_pace = race_min * 60 / dist_km
         except Exception:
             base_hm_pace = (VDOT_PACES["M"][0] + VDOT_PACES["T"][1]) / 2
     adj_pace = base_hm_pace * (1 + penalty_pct / 100)
 
-    # Segment paces
+    # Segment paces — same 5-phase shape (conservative / settle / race pace /
+    # push / empty the tank) as fractions of total distance, scaled to
+    # whatever race this actually is (was hardcoded km 0-21 for every race).
+    _seg_fracs  = [0.0, 0.237, 0.474, 0.711, 0.858, 1.0]
+    _seg_deltas = [8, 3, 0, -4, -8]
+    _seg_labels = ["Conservative", "Settle", "Race Pace", "Push", "Empty the tank"]
+    _bounds = [round(f * dist_km, 1) for f in _seg_fracs]
     segments = [
-        ("km 0–5",   adj_pace + 8,  "Conservative"),
-        ("km 6–10",  adj_pace + 3,  "Settle"),
-        ("km 11–15", adj_pace,      "Race Pace"),
-        ("km 16–18", adj_pace - 4,  "Push"),
-        ("km 19–21", adj_pace - 8,  "Empty the tank"),
+        (f"km {_bounds[i]:g}–{_bounds[i + 1]:g}", adj_pace + _seg_deltas[i], _seg_labels[i])
+        for i in range(5)
     ]
 
     # HR ceilings — derived from LTHR/MHR (HM ≈ threshold effort):
@@ -413,9 +427,9 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
 
     # Compare with base (no heat)
     print(f"📊 vs Base Plan (no heat adjustment):")
-    print(f"   Base HM pace : {fmt_pace(base_hm_pace)}")
+    print(f"   Base pace ({dist_km:g}km): {fmt_pace(base_hm_pace)}")
     print(f"   Adjusted     : {fmt_pace(adj_pace)}  (+{penalty_pct:.1f}%)")
-    time_add_sec = penalty_pct / 100 * 21.097 * base_hm_pace
+    time_add_sec = penalty_pct / 100 * dist_km * base_hm_pace
     m, s = divmod(int(time_add_sec), 60)
     print(f"   Time impact  : +{m}:{s:02d} vs lab prediction")
     print("=" * 60)
