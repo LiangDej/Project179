@@ -73,7 +73,9 @@ skills/garmin_coach_mcp/db_helper.py
 
 **If asked to run, test, or analyze output from any of these tools → run them via bash, do NOT edit the source.**
 
-**If you believe a file needs updating → STOP and tell the user what change you'd like to make, then wait for explicit approval.**
+**If you believe one of the protected files above (the 35 tools, `config.py`, or `db_helper.py`) needs updating → STOP and tell the user what change you'd like to make, then wait for explicit approval.**
+
+**⚠️ This approval requirement applies ONLY to the protected files listed above. It does NOT apply to `athlete.json`, `races.json`, or any other data file — those are meant to be edited freely, with no confirmation needed.** This matters most during first-time setup: when a user runs the onboarding flow (copying `athlete.example.json`/`races.example.json` to `athlete.json`/`races.json` and filling in their values), just write the files directly — do not ask for permission first, and do not treat this as "modifying a protected file." That's the entire point of the single-source-of-truth design: `athlete.json`/`races.json` are plain data, not code, and editing them is the *normal, expected, everyday* way this project is configured.
 
 ---
 
