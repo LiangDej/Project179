@@ -52,21 +52,32 @@ I just cloned Project 179 — Garmin JD Running Coach.
 Please set me up as a new athlete. Ask me the following one by one:
 
 1. Personal bests for each distance you have (5K / 10K / Half Marathon / Full Marathon) — only distances you've actually raced
-2. Main goal race (A-race): distance, event name, date, goal time
-3. Do you have a B-race (tune-up)? If so: distance, date
-4. Body weight (kg) — used for nutrition calculations
-5. Do you primarily run on a treadmill or outdoors?
-6. What electrolyte product do you currently use? (Say "none" if you don't use one)
+2. LTHR (Lactate Threshold HR) — if you've done a field test before (e.g. a Friel 30-min TT), give the value.
+   If not, say "none" — do not guess it or leave the example file's default value in place.
+3. Resting HR (morning, before getting out of bed) and Max HR you've actually recorded (from a hard interval or hill sprint)
+   — this matters a lot: using someone else's default could prescribe HR zones beyond what your body can safely do.
+4. Body weight (kg) and age — used for nutrition calculations, and age as a rough MHR fallback only if you have no real MHR.
+5. How many days/week do you actually run? Which day(s) are full rest (no training at all)? Do you lift — which day?
+6. Any current injury or area you need to be careful with? (Say "none" if not — do not copy any example injury text.)
+7. Main goal race (A-race): distance, event name, date, goal time
+8. Do you have a B-race (tune-up)? If so: distance, date
+9. Do you primarily run on a treadmill or outdoors?
+10. Do you use an electrolyte or gel product during training/racing? If so, name the brand + Na/carb per unit from
+    the label (check the label if you don't know). If you don't use anything, say "none" clearly — do not leave the
+    example file's placeholder text in place.
 
 From the PBs provided, estimate an initial VDOT and check whether it's consistent across all distances.
 (e.g. 5K implies VDOT 44 but FM implies VDOT 38 → not consistent → which distance should we trust?)
 Then recommend the first Time Trial to run (distance + target pace) to confirm VDOT before locking training zones.
 
-Once all info is collected, copy athlete.example.json → athlete.json and races.example.json → races.json,
-update all values, then run the test suite to verify.
+Once all info is collected, copy athlete.example.json → athlete.json and races.example.json → races.json, then
+**overwrite every relevant field with my real answers — leave no default/placeholder from the example file in
+place, not even one field** (including pain_status, training_days_per_week, rest_days, strength_day, and
+quality_nutrition/race_day_nutrition/long_run_nutrition — write real answers or "none"/"not used" over all of them).
+Then run the test suite to verify.
 ```
 
-The agent will ask questions one by one → write your files → run the test suite → report results. **You don't touch any files yourself.**
+The agent will ask questions one by one → write every field in your files (no leftover defaults from someone else) → run the test suite → report results. **You don't touch any files yourself.**
 
 ---
 
