@@ -12,6 +12,14 @@ Source: Thai Meteorological Department climatology for Bangkok metropolitan,
 daily-minimum / early-morning band (monthly normals, 1991–2020). Values are the
 typical temperature at the athlete's run time, not the daytime max.
 
+⚠️ Training-location-specific: only correct for athletes actually training in
+Bangkok. This is used only as a FALLBACK inside weather_adjuster.py when a live
+weather fetch isn't available (no OPENWEATHER_API_KEY, or the API call failed)
+— an athlete training somewhere else (Chiang Mai, Japan, Europe, etc.) who
+hits this fallback would get Bangkok's heat/humidity applied to their own
+paces. Set OPENWEATHER_API_KEY (see .env.example) to always use live weather
+for your actual location instead of this fallback.
+
     morning_temp_c(month)        -> float  (dry-bulb °C at run time)
     morning_temp_c_for(date_obj) -> float
 """

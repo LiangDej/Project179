@@ -273,6 +273,22 @@ def main():
         warn = v >= lo if not invert else v <= lo
         return "🟢" if good else ("🟡" if warn else "🔴")
 
+    # Activity-history sync freshness — running_activities_all.json (used by
+    # PMC/weekly-volume/injury-risk) can silently go stale if the watch
+    # hasn't synced to the phone, the Garmin sync script hasn't been run, or
+    # a token expired. Without an explicit check here, a coach/LLM reading
+    # this brief has no way to know the CTL/ATL/weekly-volume numbers below
+    # might be based on Wednesday's data while reading it Friday morning.
+    try:
+        from activity_loader import ACTS_FILE
+        if ACTS_FILE.exists():
+            _sync_age_days = (date.today() - date.fromtimestamp(ACTS_FILE.stat().st_mtime)).days
+            if _sync_age_days >= 1:
+                print(f"\n⚠️  DATA_STATUS: กิจกรรมล่าสุด sync มา {_sync_age_days} วันก่อน — "
+                      f"รัน fetch_incremental.py ก่อนเชื่อ CTL/ATL/weekly volume ด้านล่าง")
+    except Exception:
+        pass
+
     src_tag = f" [{src}]" if src != "live" else ""
     print(f"\n📊 BODY STATUS{src_tag}")
     bb_now = health.get("body_battery")
@@ -334,10 +350,14 @@ def main():
     print("📈 TRAINING LOAD (PMC)")
     try:
         from training_load import (load_activities, daily_tss_map, calc_pmc,
-                                    compute_current_pmc, PMC_WARMUP_DAYS, tsb_label)
+                                    compute_current_pmc, PMC_WARMUP_DAYS, tsb_label,
+                                    pmc_confidence)
         _acts    = load_activities()                          # file + live overlay (กัน stale)
         _start   = today - timedelta(days=PMC_WARMUP_DAYS)    # shared warmup (canonical)
         _pmc     = compute_current_pmc(_acts, today)          # matches training_load/season_summary exactly
+        _, _, _pmc_warning = pmc_confidence(_acts, today)
+        if _pmc_warning:
+            print(f"   {_pmc_warning}")
         if _pmc:
             _, _, _ctl, _atl, _tsb = _pmc[-1]
             _ctl7     = round(_ctl - _pmc[-8][2], 1) if len(_pmc) >= 8 else 0

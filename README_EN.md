@@ -35,6 +35,10 @@ cd Project179
 python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
+> **Windows:** the venv/interpreter path differs from Mac/Linux — use `.venv\Scripts\python.exe` instead of `.venv/bin/python3.13` everywhere in this doc (e.g. `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
+>
+> **⚠️ Garmin login may fail on a Cloud VM/VPS** (AWS EC2, DigitalOcean, a GitHub Actions runner, Replit, **including Google Colab**) — Garmin Connect often blocks datacenter IP ranges via its Cloudflare WAF (login fails even with correct credentials). This is a commonly-reported issue with unofficial Garmin API libraries in general, but **not verified to affect every provider** (including Colab, despite the table above listing it as fully working — if login fails on any cloud provider, suspect this first). Safest is running from a residential IP at home (a real Mac/PC/WSL machine).
+
 ### 2 · Garmin credentials
 
 ```bash
