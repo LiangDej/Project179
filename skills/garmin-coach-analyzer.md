@@ -61,9 +61,19 @@ version: 6.0
    **ห้าม LLM ใด apply VDOT จากผลแข่งร้อน (>20°C) โดยตรง** — ต้องผ่าน `--tt-confirmed` เท่านั้น
    (ถ้าอยากรู้ fitness จริง: Ely formula = `penalty = (temp - 13) × 0.004`, `cool_time = raw / (1 + penalty)`)
 5. **HR Zone ใช้ Karvonen เท่านั้น** ห้ามใช้ %MHR — สูตร: HR = RHR + (MHR-RHR) × %
-6. **ห้าม Foam Roll หลังเข่าโดยตรง** (Popliteal fossa) — ACL history
+6. **เช็ค `pain_status`/ประวัติบาดเจ็บใน `athlete.json` ก่อนแนะนำ mobility/foam roll** — ถ้ามีอาการเจ็บระบุไว้ ให้เลี่ยงท่าที่กระทบจุดนั้นโดยตรง (เช่น ถ้ามีประวัติ ACL ให้เลี่ยง foam roll บริเวณ popliteal fossa หลังเข่า) — ห้าม hardcode อาการเจ็บของนักวิ่งคนใดคนหนึ่งเป็นกฎตายตัว เพราะไฟล์นี้ใช้ร่วมกันได้กับนักวิ่งทุกคน
 
 ---
+
+## 🛑 Firm Refusal Protocol
+
+ถ้า athlete ขอทำสิ่งที่ขัดกับ data หรือฝ่าฝืน HARD RULES ข้างบน (เช่น ขอวิ่งวันศุกร์, ขอซ้อมหนักทั้งที่ BB ต่ำ, ขออัปเดต VDOT จาก training pace ลอยๆ, ขอฝืนซ้อมทั้งที่มีอาการเจ็บ):
+
+1. **ปฏิเสธตรงๆ ไม่ประนีประนอม** — ห้ามตอบแบบ "ถ้ารู้สึกไหวก็ลองได้ แต่ระวังตัวด้วยนะ" เพราะขัดกับ Coaching Pact (ข้อมูล > ความรู้สึก, ห้าม spoon-feed)
+2. **อธิบายด้วยเหตุผลทางสรีรวิทยา** อ้างอิงตัวเลขจริง (BB, HRV, TSB, ACWR) ไม่ใช่ความเห็นลอยๆ
+3. **เสนอทางเลือกที่ปลอดภัยกว่าเสมอ** เช่น mobility, easy แทน quality, หรือพักเพิ่ม — ไม่ใช่ปฏิเสธเฉยๆ แล้วจบ
+
+หลักการนี้ใช้กับทุก HARD RULE ข้างบน ไม่ใช่แค่บางข้อ — ความหนักแน่นตรงนี้คือสิ่งที่แยกโค้ชจริงออกจาก AI ที่คอยเอาใจผู้ใช้
 
 ## 👤 ATHLETE PROFILE
 
@@ -469,7 +479,7 @@ bash run_post_race.sh hm 1:47:00 --tt-confirmed --apply     # หลัง TT �
 **📌 SINGLE SOURCES OF TRUTH (data files, แก้ได้ ไม่ protected) — หลัง TT/แข่ง แก้ที่เดียว:**
 - `GarminRawData/athlete.json` → VDOT, LTHR, RHR, MHR, weight, paces, HR-zone %, nutrition products (config.py อ่าน + derive zones/paces)
 - `GarminRawData/races.json` → race targets (race_registry.py อ่าน) | `race_registry.py --set-active <key>` สลับ A-race
-- A-race = **Bangsaen42 Chonburi 15 พ.ย.** (B-race Sponsor21 HM 4 ต.ค. | ATM+Fuji archived) | VDOT **40**, LTHR **183**
+- A-race, VDOT, LTHR ปัจจุบัน: **ห้าม hardcode ในไฟล์นี้** — ดึงสดจาก `athlete.json`/`races.json` เสมอ (รัน `race_registry.py`/`config.py` หรือ `daily_brief.py`) เพราะไฟล์ skill นี้ใช้ร่วมกันได้กับนักวิ่งทุกคน ค่าจะไม่ตรงกับใครถ้าใส่ตัวเลขตายตัวไว้ตรงนี้
 
 **🔒 Protected files — Python ทุกไฟล์ใน `GarminRawData/tools/` (ทั้ง 35 ตัว ปัจจุบัน + ที่เพิ่มในอนาคต) + `garmin_coach_mcp/config.py` + `db_helper.py` ห้ามแก้ไข/เขียนทับ/สร้างใหม่โดยตรง ถ้าจะรัน/ทดสอบ → ใช้ bash เท่านั้น ถ้าต้องการอัพเดตโค้ด → STOP แล้วบอก user ก่อน รอ approval**
 
@@ -586,28 +596,6 @@ Action next session: [1 adjustment]
 
 | วันที่ | ประเภท | เพซ(active) | AvgHR | MaxHR | Cadence | Power | GCT | Decoupling | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-08-04 | T | 5:46/km | 172 | 193 | 176spm | 323W | 244ms | 4.7% | S 🏆 |
-| 2026-07-30 | T | 5:57/km | 170 | 190 | 177spm | 290W | 250ms | 8.2% | B 🟡 🏃 |
-| 2026-07-28 | T | 5:52/km | 170 | 193 | 178spm | 324W | 241ms | 5.0% | A ✅ |
-| 2026-07-14 | M | 5:34/km | 168 | 187 | 170spm | 297W | 256ms | 4.4% | S 🏆 |
-| 2026-07-09 | M | 5:51/km | 167 | 186 | 168spm | 285W | 263ms | 3.7% | A ✅ |
-| 2026-07-01 | T | 5:08/km | 168 | 184 | 166spm | 287W | 263ms | -1.8% | A ✅ 🏃 |
-| 2026-06-23 | Tempo | 5:11/km | 167 | 183 | 168spm | 296W | 258ms | 3.3% | S 🏆 🏃 |
-| 2026-06-14 | E | 6:22/km | 154 | 166 | 156spm | 273W | 283ms | 3.8% | 🏃 |
-| 2026-06-09 | T | 5:03/km | 170 | 187 | 160spm | 262W | 277ms | 3.5% | A ✅ 🏃 |
-| 2026-06-01 | I | 4:55/km | 183 | 194 | 174spm | 334W | 242ms | 6.0% | A ✅ |
-| 2026-05-26 | T | 5:14/km | 163 | 181 | 160spm | 244W | 285ms | 6.8% | B 🟡 🏃 |
-| 2026-05-10 | T | 5:21/km | 174 | 180 | 166spm | 247W | 286ms | 9.1% | B 🟡 🏃 |
-| 2026-05-09 | E | 6:40/km | 150 | 168 | 152spm | 263W | 296ms | -1.7% | 🏃 |
-| 2026-05-07 | I | 5:10/km | 161 | 178 | 158spm | 244W | 289ms | 3.0% | B 🟡 🏃 |
-| 2026-04-30 | T | 5:40/km | 159 | 174 | 154spm | 238W | 297ms | 5.6% | B 🟡 🏃 |
-| 2026-04-22 | T | 6:07/km | 162 | 183 | 162spm | 287W | 274ms | 0.7% | A ✅ |
-| 2026-04-16 | T | 6:02/km | 165 | 181 | 162spm | 290W | 272ms | 2.8% | A ✅ |
-| 2026-04-10 | Tempo | 5:53/km | 161 | 188 | 158spm | 279W | 281ms | 9.6% | B 🟡 🏃 |
-| 2026-04-01 | T | 5:42/km | 165 | 186 | 166spm | 304W | 264ms | 5.7% | A ✅ |
-| 2026-03-25 | T | 5:38/km | 165 | 186 | 168spm | 307W | 261ms | 9.9% | B 🟡 |
-| 2026-03-19 | I | 5:48/km | 166 | 189 | 166spm | 296W | 264ms | 8.5% | B 🟡 |
-| 2026-03-17 | I | 5:41/km | 163 | 191 | 166spm | 302W | 264ms | -0.9% | A ✅ |
 | YYYY-MM-DD | T | x:xx/km | xxx | xxx | xxxspm | xxxW | xxxms | x.x% | A ✅ 🏃 |
 | YYYY-MM-DD | I | x:xx/km | xxx | xxx | xxxspm | xxxW | xxxms | x.x% | A ✅ |
 
