@@ -145,11 +145,20 @@ def consistency_tests():
             over.append((t, p["replace_pct"]))
     check("nutrition: plan never exceeds 80% ceiling (all temps)", not over, f"violations={over}")
 
-    # --- BUG CLASS: _classify_speed maps to correct VDOT-40 zone ---
+    # --- BUG CLASS: _classify_speed maps to correct zone for THIS athlete's
+    #     VDOT (was hardcoded to fixed km/h values that only held for
+    #     VDOT-40 — any other athlete's VDOT_PACES would fail this check
+    #     even though _classify_speed itself derives boundaries from config
+    #     correctly). Build test speeds from the zone midpoint of the
+    #     athlete's own VDOT_PACES instead. ---
     import post_session_analyzer as psa
-    cases = {13.6:"R", 13.0:"I", 12.0:"T", 11.3:"M", 9.0:"E"}
-    bad = {s:psa._classify_speed(s) for s,e in cases.items() if psa._classify_speed(s)!=e}
-    check("post_session: _classify_speed correct per VDOT-40", not bad, f"wrong={bad}")
+    cases = {}
+    for zone in ("R", "I", "T", "M", "E"):
+        lo_sec, hi_sec = config.VDOT_PACES[zone]
+        mid_sec = (lo_sec + hi_sec) / 2
+        cases[round(3600 / mid_sec, 2)] = zone
+    bad = {s: psa._classify_speed(s) for s, e in cases.items() if psa._classify_speed(s) != e}
+    check("post_session: _classify_speed correct per current athlete VDOT", not bad, f"wrong={bad}")
 
     # --- BUG CLASS: injury ACWR uses EWMA (not raw-km false CRITICAL) ---
     import injury_risk_detector as ird
@@ -174,10 +183,19 @@ def consistency_tests():
           not race_specific_on_race_day,
           f"offending={[p['name'] for p in race_specific_on_race_day]}")
 
-    # --- race registry: Bangsaen42 active, Fuji archived ---
-    check("races: active race == bangsaen", rr.active_race_key() == "bangsaen")
-    check("races: Fuji is archived (not active)",
-          not rr.load_races().get("fuji", {}).get("active", True))
+    # --- race registry: active race must be a real, active race — and no
+    #     archived race can be mistaken for it. Was hardcoded to literal
+    #     "bangsaen"/"fuji" names, which only holds for this athlete's own
+    #     races.json; generalized so it works for anyone's race names. ---
+    _races = rr.load_races()
+    _active_key = rr.active_race_key()
+    check("races: active_race_key() points to a real, active race",
+          _active_key in _races and _races[_active_key].get("active", True),
+          f"active_race={_active_key}, races={list(_races.keys())}")
+    _archived_but_active = [k for k, r in _races.items()
+                             if not r.get("active", True) and k == _active_key]
+    check("races: no archived race is treated as the active race",
+          not _archived_but_active, f"offending={_archived_but_active}")
 
     # --- athlete.json is the source: changing config requires editing it ---
     aj = ROOT / "GarminRawData" / "athlete.json"

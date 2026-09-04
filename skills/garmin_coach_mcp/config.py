@@ -49,10 +49,20 @@ ATHLETE["hrr"] = ATHLETE["mhr"] - ATHLETE["rhr"]   # derived
 # HR Zones — %HRR (Karvonen) boundaries from athlete.json, LTHR-anchored so
 # T-ceiling = LTHR. (E 0.79→163, M 0.862→174, T 0.921→183=LTHR, I 0.95→187)
 # ---------------------------------------------------------------------------
-_ZP  = _AJ.get("hr_zone_hrr_pct", {"E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95})
+_ZP  = dict(_AJ.get("hr_zone_hrr_pct", {"E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95}))
 _rhr = ATHLETE["rhr"]
 _hrr = ATHLETE["hrr"]
 _mhr = ATHLETE["mhr"]
+
+# T-ceiling is defined to equal LTHR (T-pace == threshold == LTHR by
+# definition) — auto-derive hr_zone_hrr_pct["T"] from the athlete's actual
+# LTHR/RHR/HRR instead of requiring someone to hand-tune a 3-decimal ratio
+# in athlete.json until it happens to satisfy that equation. This removes an
+# onboarding footgun: a new athlete who fills in their own LTHR/RHR/MHR but
+# leaves hr_zone_hrr_pct at the example file's default gets a T-zone that
+# doesn't match their real LTHR at all.
+if _hrr > 0:
+    _ZP["T"] = (ATHLETE["lthr"] - _rhr) / _hrr
 
 HR_ZONES = [
     ("Z1 Easy",       _rhr,                          _rhr + int(_hrr * _ZP["E"])),

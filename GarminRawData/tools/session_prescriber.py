@@ -220,7 +220,10 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
         else:
             session["label"]   = "🏋️ Strength & Conditioning"
             session["workout"] = "Squat 3×10 | RDL 3×10 | TKE 3×15 | Hip Thrust 3×12"
-            session["note"]    = "เน้น Form ป้องกัน ACL — ไม่ใช่ Heavy Weight"
+            _pain = ATHLETE.get("pain_status", "none")
+            session["note"] = (f"เน้น Form ป้องกันบาดเจ็บ (pain_status: {_pain}) — ไม่ใช่ Heavy Weight"
+                                if _pain and _pain != "none"
+                                else "เน้น Form ที่ถูกต้อง — ไม่ใช่ Heavy Weight")
         session["nutrition"]   = NUTRITION["strength"]
 
     elif day_type in ("quality1", "quality2") and override_type == "easy":

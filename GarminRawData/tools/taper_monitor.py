@@ -49,12 +49,17 @@ try:
 except Exception:
     RACE_REGISTRY = {"atm": {"name": "ATM Bangkok Marathon (42km)", "date": date(2026, 11, 29)}}
 
-# Taper volume targets (% of peak week to RETAIN — not cut)
+# Taper volume targets (% of peak week to RETAIN — not cut).
+# "far" (>15 days out) is NOT actual taper — it's most of the training cycle
+# (Base/Quality/Race-Specific build), where training_planner.py deliberately
+# builds volume UP toward peak_km. Capping it at 80% of peak here contradicted
+# that and mislabeled normal build weeks as "Pre-Taper", so it carries
+# is_taper=False and analyze_taper() skips the volume ceiling/warning for it.
 TAPER_VOLUME = {
-    "far":    {"days_min": 15, "days_max": 999, "retain_pct": 0.80, "label": "Pre-Taper"},
-    "early":  {"days_min": 8,  "days_max": 14,  "retain_pct": 0.70, "label": "Early Taper (-30%)"},
-    "late":   {"days_min": 4,  "days_max": 7,   "retain_pct": 0.50, "label": "Race Week (-50%)"},
-    "final":  {"days_min": 0,  "days_max": 3,   "retain_pct": 0.30, "label": "Final Days (-70%)"},
+    "far":    {"days_min": 15, "days_max": 999, "retain_pct": 0.80, "label": "Build Phase (not tapering yet)", "is_taper": False},
+    "early":  {"days_min": 8,  "days_max": 14,  "retain_pct": 0.70, "label": "Early Taper (-30%)", "is_taper": True},
+    "late":   {"days_min": 4,  "days_max": 7,   "retain_pct": 0.50, "label": "Race Week (-50%)", "is_taper": True},
+    "final":  {"days_min": 0,  "days_max": 3,   "retain_pct": 0.30, "label": "Final Days (-70%)", "is_taper": True},
 }
 
 # BB targets for taper
@@ -158,8 +163,8 @@ def _get_taper_window(days_to_race: int) -> dict:
     for key, tw in TAPER_VOLUME.items():
         if tw["days_min"] <= days_to_race <= tw["days_max"]:
             return {**tw, "key": key}
-    return {"key": "far", "retain_pct": 0.80, "label": "Pre-Taper",
-            "days_min": 15, "days_max": 999}
+    return {"key": "far", "retain_pct": 0.80, "label": "Build Phase (not tapering yet)",
+            "days_min": 15, "days_max": 999, "is_taper": False}
 
 
 # ---------------------------------------------------------------------------
@@ -177,9 +182,14 @@ def analyze_taper(days_to_race: int, bb: int | None, mileage_this_week: float,
     warnings = []
     positives = []
 
-    # --- Volume check ---
+    # --- Volume check — only meaningful during an actual taper window.
+    # "far" (>15 days out) is a build phase; training_planner.py deliberately
+    # ramps volume UP toward peak_km there, so no ceiling/compliance verdict
+    # applies — just report where volume stands, without judging it.
     if days_to_race <= 0:
         warnings.append("🏁 วันแข่งถึงแล้ว! Good luck!")
+    elif not window.get("is_taper", True):
+        positives.append(f"ℹ️  Volume {mileage_this_week} km ({volume_pct}% ของ peak {peak_km} km) — ยังอยู่ช่วง build ไม่ใช่ taper")
     elif not volume_ok:
         over_by = round(mileage_this_week - target_km, 1)
         warnings.append(
