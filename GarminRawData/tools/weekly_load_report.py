@@ -218,14 +218,29 @@ def main():
     # Trend summary
     if len(weeks_data) >= 2:
         cur, prev = weeks_data[0], weeks_data[1]
-        delta = cur['total_km'] - prev['total_km']
-        pct   = (delta / prev['total_km'] * 100) if prev['total_km'] > 0 else 0
+        # Current week may not be over yet — comparing its running total
+        # straight against last week's FULL 7 days always reads as a big
+        # drop mid-week and got mislabeled "Taper Volume ลดลงดีมาก" even on
+        # a normal Wednesday. Prorate last week's total to the same number
+        # of days elapsed so far for an apples-to-apples comparison.
+        days_elapsed = today.weekday() + 1  # Monday=0 -> 1..7
+        week_complete = days_elapsed == 7
+        prev_prorated = prev['total_km'] * (days_elapsed / 7)
+        delta = cur['total_km'] - prev_prorated
+        pct   = (delta / prev_prorated * 100) if prev_prorated > 0 else 0
         arrow = "↑" if delta > 0 else "↓"
         print(f"\n{'─'*75}")
-        print(f"📈 Volume Change vs Last Week: {arrow}{abs(delta):.1f} km ({pct:+.1f}%)")
+        if week_complete:
+            print(f"📈 Volume Change vs Last Week: {arrow}{abs(delta):.1f} km ({pct:+.1f}%)")
+        else:
+            print(f"📈 Volume vs Last Week (prorated to {days_elapsed}/7 days elapsed): "
+                  f"{arrow}{abs(delta):.1f} km ({pct:+.1f}%)")
 
-        # 10% rule check
-        if pct > 10:
+        # 10% rule check — only meaningful once the current week is
+        # actually over; a partial week can't be judged as "taper compliant"
+        if not week_complete:
+            print(f"ℹ️  สัปดาห์นี้ยังไม่จบ ({days_elapsed}/7 วัน) — ตัวเลข compliance/taper verdict รอครบสัปดาห์ก่อน")
+        elif pct > 10:
             print(f"⚠️  Volume เพิ่มขึ้น > 10% — เสี่ยง Overtraining! ลดลง")
         elif pct < -30:
             print(f"✅ Taper Volume ลดลงดีมาก ({pct:.1f}%)")
