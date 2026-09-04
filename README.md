@@ -35,6 +35,10 @@ cd Project179
 python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
+> **Windows:** venv/interpreter path ต่างจาก Mac/Linux — ใช้ `.venv\Scripts\python.exe` แทน `.venv/bin/python3.13` ทุกที่ที่เห็นในเอกสารนี้ (เช่น `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
+>
+> **⚠️ Garmin login อาจ fail บน Cloud VM/VPS** (AWS EC2, DigitalOcean, GitHub Actions runner, Replit, **รวมถึง Google Colab**) — Garmin Connect มักบล็อก IP ของ datacenter ผ่าน Cloudflare WAF (login จะ fail ทั้งที่ credential ถูก) นี่เป็นปัญหาที่พบบ่อยกับ unofficial Garmin API library ทั่วไป แต่**ยังไม่ได้ทดสอบยืนยัน 100% ว่าเกิดกับทุก provider** (รวม Colab ด้วย แม้ตารางด้านบนจะระบุว่า Colab ใช้ได้เต็มรูปแบบ — ถ้าเจอ login fail บน cloud provider ไหนก็ตาม ให้สงสัยเรื่องนี้ก่อน) ปลอดภัยสุดคือรันจาก residential IP ที่บ้าน (Mac/PC/WSL ในเครื่องจริง)
+
 ### 2 · Garmin credentials
 
 ```bash

@@ -44,7 +44,7 @@
   },
 
   "nutrition_products": {
-    "_comment": "Na content of your electrolyte products in mg per unit.",
+    "_comment": "Na content of your electrolyte products in mg per unit. Field names below (prevo_na_mg, aminovital_na_mg) are just the original developer's products — the NAMES don't matter, put YOUR product's numbers in these same two fields regardless of brand (e.g. SaltStick Caps, Precision Fuel & Hydration, Maurten, GU Roctane, SIS — check each product's own label for its actual Na mg).",
     "prevo_na_mg": 650,
     "aminovital_na_mg": 90
   },

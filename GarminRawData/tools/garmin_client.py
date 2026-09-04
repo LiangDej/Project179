@@ -177,8 +177,12 @@ def garmin_get(fn, *args, **kwargs):
 # ---------------------------------------------------------------------------
 # Client factory
 # ---------------------------------------------------------------------------
-def _make_client():
-    """สร้าง Garmin client ใหม่พร้อม tokenstore directory approach"""
+def _make_client(mfa_code: str | None = None):
+    """สร้าง Garmin client ใหม่พร้อม tokenstore directory approach
+
+    mfa_code: ใส่ตอน fresh login ครั้งแรกถ้า account เปิด 2FA (ปกติไม่ต้องใส่
+    เพราะ tokenstore restore จะข้ามขั้นตอนนี้ไปหลัง login สำเร็จครั้งแรก)
+    """
     try:
         from garminconnect import Garmin
     except ImportError:
@@ -190,7 +194,27 @@ def _make_client():
     username, password = _load_credentials()
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
-    client = Garmin(username, password)
+    def _prompt_mfa():
+        # Called by garminconnect only when the account actually needs a
+        # 2FA/MFA code. An AI agent runs tools non-interactively (no
+        # terminal attached to stdin) — without this guard, garminconnect
+        # would call input() and hang forever waiting for a code nobody can
+        # type, and the agent would see a stuck/timed-out process and often
+        # misdiagnose it as a wrong password, retrying until Garmin
+        # rate-limits or locks the account.
+        if mfa_code:
+            return mfa_code
+        if sys.stdin.isatty():
+            return input("🔐 Garmin ต้องการ MFA/2FA code (เช็คอีเมล/แอป authenticator): ").strip()
+        raise RuntimeError(
+            "❌ Garmin account นี้เปิด MFA/2FA — ต้อง login ครั้งแรกแบบ interactive ก่อน\n"
+            "  รันคำสั่งนี้จาก terminal จริงของคุณเอง (ไม่ใช่ผ่าน AI agent):\n"
+            "    cd GarminRawData/tools && ../../.venv/bin/python3.13 garmin_client.py --mfa <code จากอีเมล/แอป>\n"
+            "  หลัง login สำเร็จครั้งแรก session token จะถูกเก็บไว้ใน tokenstore —\n"
+            "  ทุก tool/AI agent ครั้งต่อไปจะ restore session นี้ได้เลยโดยไม่ต้องขอ MFA ซ้ำ"
+        )
+
+    client = Garmin(username, password, prompt_mfa=_prompt_mfa)
 
     # พยายาม restore session token ก่อน (ลด login calls)
     try:
@@ -220,16 +244,19 @@ def _make_client():
     return client
 
 
-def get_client():
+def get_client(mfa_code: str | None = None):
     """
     คืน singleton Garmin client (สร้างใหม่ถ้ายังไม่มี หรือถ้าถูก invalidate)
+
+    mfa_code: ส่งต่อไป _make_client() — ใช้เฉพาะตอน fresh login ครั้งแรกที่
+    ต้อง MFA (ดู `python3 garmin_client.py --mfa <code>` สำหรับ one-time setup)
 
     Returns:
         Garmin client instance ที่พร้อมใช้งาน
     """
     global _client
     if _client is None:
-        _client = _make_client()
+        _client = _make_client(mfa_code=mfa_code)
     return _client
 
 
@@ -608,3 +635,26 @@ def is_garmin_reachable() -> bool:
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# One-time interactive setup — run this directly (not via an AI agent) if
+# your Garmin account has MFA/2FA enabled, before letting any tool/agent try
+# to log in non-interactively.
+#
+#   cd GarminRawData/tools
+#   ../../.venv/bin/python3.13 garmin_client.py --mfa <code from email/app>
+#
+# On success the session token is saved to the tokenstore directory and every
+# tool afterwards (agent-run or manual) restores it without needing MFA again.
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="One-time interactive Garmin login (for MFA/2FA accounts)")
+    parser.add_argument("--mfa", type=str, default=None,
+                         help="MFA/2FA code from email or authenticator app")
+    args = parser.parse_args()
+    invalidate_session()
+    get_client(mfa_code=args.mfa)
+    print("✅ Login สำเร็จ — session token บันทึกแล้ว ใช้ tool อื่นได้เลยโดยไม่ต้องขอ MFA อีก")

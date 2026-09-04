@@ -114,6 +114,41 @@ def compute_current_pmc(activities=None, today=None, display_days=0):
     return calc_pmc(daily_tss_map(activities, start, today), start, today)
 
 
+def pmc_confidence(activities, today=None):
+    """How many days of real activity history exist, and whether CTL/TSB
+    should be trusted yet. CTL is a 42-day EWMA — a fresh clone that's only
+    synced 1-2 weeks of Garmin history will show an artificially low CTL and
+    an inflated TSB (often +20 to +30), which reads as "very fit, fully
+    rested" when it really just means "not enough data yet" — that's an easy
+    way to prescribe a much harder week than the athlete can actually handle.
+    Returns (days_of_history, confidence, warning_or_None).
+    """
+    if today is None:
+        today = date.today()
+    dates = []
+    for a in activities:
+        d = a.get("startTimeLocal") or a.get("date")
+        if d:
+            try:
+                dates.append(date.fromisoformat(str(d)[:10]))
+            except Exception:
+                pass
+    if not dates:
+        return 0, "NONE", "⚠️  ไม่พบ activity history เลย — CTL/ATL/TSB ยังไม่มีความหมาย ให้ดู RPE/pace แทน"
+    days_history = (today - min(dates)).days
+    if days_history < 14:
+        return days_history, "LOW", (
+            f"⚠️  มีประวัติแค่ {days_history} วัน — CTL/TSB ยังไม่น่าเชื่อถือเลย "
+            f"(ต้องการ ~42 วันขึ้นไปถึงจะเริ่มนิ่ง) อย่าเพิ่ง prescribe จากตัวเลขพวกนี้ ให้ดู RPE/pace/BB แทนไปก่อน"
+        )
+    elif days_history < 42:
+        return days_history, "WARMUP", (
+            f"🟡 มีประวัติ {days_history}/42 วัน — CTL ยังไม่ converge เต็มที่ "
+            f"ตัวเลขน่าจะยังต่ำกว่าความฟิตจริง อย่าตกใจถ้า CTL ดูต่ำ"
+        )
+    return days_history, "OK", None
+
+
 def tsb_label(tsb):
     """Classify TSB (Form) into training state."""
     if tsb > 25:
@@ -186,6 +221,11 @@ def main():
     print(f"\n{'='*65}")
     print(f"📈 TRAINING LOAD — PMC Report ({today})")
     print(f"{'='*65}")
+
+    _, _confidence, _warning = pmc_confidence(activities, today)
+    if _warning:
+        print(f"\n  {_warning}")
+
     print(f"\n  🏋️  CTL (Fitness)  : {ctl:6.1f}")
     print(f"  ⚡ ATL (Fatigue)  : {atl:6.1f}")
     print(f"  🎯 TSB (Form)     : {tsb:+6.1f}   {state}")
