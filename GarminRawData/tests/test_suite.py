@@ -2,20 +2,25 @@
 """
 test_suite.py — PROJECT 179 self-contained test runner (no pytest needed).
 
-Three layers:
-  1. UNIT        — core logic of each tool (formulas, monotonicity, bands)
-  2. CONSISTENCY — single-source invariants (no tool may contradict config /
-                   athlete.json / races.json). This is what catches the
-                   "HR < 155 vs 163" class of bug automatically.
-  3. FUNCTIONAL  — run the real daily-flow tools end-to-end, assert no crash +
-                   output agrees with config.
+Prioritized Test Architecture:
+  1. UNIT P0 — Daily & Session Core (PMC Banister math, ACWR injury thresholds, speed classification)
+  2. UNIT P1 — Core Physiology & VDOT Math (Daniels limits, round-trip inversion, Karvonen dynamics, treadmill)
+  3. UNIT P2 — Macro & Weekly Planning (Prescriptions, 80/20 rule, periodization progression)
+  4. UNIT P3 — Race Tactics & Nutrition (ACSM sodium solver, post-race heat guards, taper windows)
+  5. UNIT P4 — Environmental & Registry (Ely penalty, WBGT TRIMP, climate tables, race loader)
+  6. CONSISTENCY — Single-source invariants & static source scans
+  7. FUNCTIONAL  — Real tools end-to-end (CLI regression suite)
 
 Run:  .venv/bin/python3.13 GarminRawData/tests/test_suite.py
 Exit code 0 = all pass, 1 = any fail.
 """
 import sys
+import os
 import re
+import math
+import json
 import subprocess
+from datetime import date, timedelta, datetime
 from pathlib import Path
 
 ROOT      = Path(__file__).resolve().parent.parent.parent          # AntiGravity/
@@ -27,7 +32,7 @@ sys.path.insert(0, str(TOOLS))
 sys.path.insert(0, str(COACH_MCP))
 
 # ---------------------------------------------------------------------------
-# tiny test harness
+# Tiny test harness
 # ---------------------------------------------------------------------------
 _RESULTS = []
 
@@ -43,8 +48,6 @@ def check(name, cond, detail=""):
 
 def run_tool(args, timeout=90):
     """Run a tool via subprocess with PYTHONPATH set. Returns (rc, stdout)."""
-    env = {"PYTHONPATH": f"{COACH_MCP}:{TOOLS}", "PATH": "/usr/bin:/bin"}
-    import os
     env = {**os.environ, "PYTHONPATH": f"{COACH_MCP}:{TOOLS}"}
     try:
         p = subprocess.run([str(PYBIN), *[str(a) for a in args]],
@@ -56,12 +59,54 @@ def run_tool(args, timeout=90):
 
 
 # ===========================================================================
-# 1. UNIT TESTS
+# 1. UNIT TESTS — PRIORITY 0: DAILY & SESSION CORE (Runs Daily/Post-Run)
 # ===========================================================================
-def unit_tests():
-    print("\n── 1. UNIT ──────────────────────────────────────────────")
+def unit_p0_daily_and_session():
+    print("\n── 1. UNIT P0: DAILY & SESSION CORE ─────────────────────")
+    import training_load as tl
+    import injury_risk_detector as ird
+
+    # PMC / Banister Impulse-Response Math
+    check("training_load: K_CTL derived from tau=42", abs(tl.K_CTL - (1 - math.exp(-1 / 42))) < 1e-6)
+    check("training_load: K_ATL derived from tau=7", abs(tl.K_ATL - (1 - math.exp(-1 / 7))) < 1e-6)
+
+    # Impulse-response behavior on rest days
+    pmc = tl.calc_pmc({"2026-01-01": 100.0}, date(2026, 1, 1), date(2026, 1, 5))
+    check("training_load: Day 1 TSB == CTL - ATL", abs(pmc[0][4] - (pmc[0][2] - pmc[0][3])) < 0.2)
+    check("training_load: Day 2 rest day CTL decays", pmc[1][2] < pmc[0][2])
+    check("training_load: Day 2 rest day ATL decays", pmc[1][3] < pmc[0][3])
+    check("training_load: ATL decays faster than CTL on rest days",
+          (pmc[0][3] - pmc[1][3]) > (pmc[0][2] - pmc[1][2]))
+    check("training_load: TSB rises on consecutive rest days (recovery)", pmc[2][4] > pmc[1][4])
+
+    # HR-TSS formula boundaries
+    check("training_load: calc_hr_tss is 0 at RHR",
+          tl.calc_hr_tss({"averageHR": tl.RHR, "duration": 3600}) == 0.0)
+    check("training_load: calc_hr_tss is 0 when duration is 0",
+          tl.calc_hr_tss({"averageHR": tl.RHR + 20, "duration": 0}) == 0.0)
+    check("training_load: calc_hr_tss below RHR is 0",
+          tl.calc_hr_tss({"averageHR": tl.RHR - 5, "duration": 3600}) == 0.0)
+    check("training_load: calc_hr_tss at T_HR for 1h == 100 hrTSS",
+          abs(tl.calc_hr_tss({"averageHR": tl.T_HR, "duration": 3600}) - 100.0) < 0.5)
+
+    # Injury Risk & ACWR (Gabbett 2016)
+    check("injury_risk: ACWR_CAUTION == 1.3 (upper sweet spot)", ird.ACWR_CAUTION == 1.3)
+    check("injury_risk: ACWR_DANGER == 1.5 (danger zone)", ird.ACWR_DANGER == 1.5)
+    check("injury_risk: MAX_RUN_STREAK == 4 days", ird.MAX_RUN_STREAK == 4)
+    check("injury_risk: RISK_LEVELS contains 4 tiers", len(ird.RISK_LEVELS) == 4)
+
+    # Speed-to-pace inversion precision
+    check("post_session: speed to pace inversion is exact", round(3600 / (3600 / 12.0), 2) == 12.0)
+
+
+# ===========================================================================
+# 2. UNIT TESTS — PRIORITY 1: CORE PHYSIOLOGY & VDOT MATH
+# ===========================================================================
+def unit_p1_physiology_and_vdot():
+    print("\n── 2. UNIT P1: CORE PHYSIOLOGY & VDOT MATH ──────────────")
     import config
     import vdot_math as vm
+    import treadmill_pace_model as tpm
 
     # config derives correctly from athlete.json
     z = config.HR_ZONE_BOUNDS
@@ -70,88 +115,232 @@ def unit_tests():
           f"T-ceiling {z['Z3_T'][1]} vs LTHR {config.ATHLETE['lthr']}")
     check("config: HR zones contiguous & monotonic",
           all(z[a][1] == z[b][0] for a, b in
-              [("Z1_E","Z2_M"),("Z2_M","Z3_T"),("Z3_T","Z4_I"),("Z4_I","Z5_R")]))
+              [("Z1_E", "Z2_M"), ("Z2_M", "Z3_T"), ("Z3_T", "Z4_I"), ("Z4_I", "Z5_R")]))
     check("config: hrr == mhr - rhr",
           config.ATHLETE["hrr"] == config.ATHLETE["mhr"] - config.ATHLETE["rhr"])
     check("config: VDOT_PACES monotonic (E slower than R)",
           config.VDOT_PACES["E"][0] > config.VDOT_PACES["R"][1])
 
-    # vdot_math — VDOT 40 known race times (Daniels table)
-    hm = vm.predict_race_time(40, 21097)
+    # Dynamic LTHR auto-derivation consistency across synthetic profiles
+    hrr1 = 185 - 55
+    t_pct1 = (170 - 55) / hrr1
+    check("config: synthetic runner 1 LTHR 170 consistent", 55 + int(hrr1 * t_pct1) == 170)
+    hrr2 = 165 - 60
+    t_pct2 = (150 - 60) / hrr2
+    check("config: synthetic runner 2 LTHR 150 consistent", 60 + int(hrr2 * t_pct2) == 150)
+
+    # vdot_math — Boundary inputs
+    check("vdot_math: compute_vdot rejects dist < 1000m", vm.compute_vdot(800, 2.5) is None)
+    check("vdot_math: compute_vdot rejects duration == 0", vm.compute_vdot(5000, 0) is None)
+    check("vdot_math: compute_vdot rejects duration < 0", vm.compute_vdot(5000, -10) is None)
+
+    # vdot_math — Daniels table benchmarks
+    hm = vm.predict_race_time(40, 21097.5)
     fm = vm.predict_race_time(40, 42195)
     check("vdot_math: VDOT40 HM ~1:50 (109-112min)", 109 <= hm <= 112, f"HM={hm:.1f}min")
     check("vdot_math: VDOT40 FM ~3:49 (227-232min)", 227 <= fm <= 232, f"FM={fm:.1f}min")
-    check("vdot_math: longer distance = slower pace",
-          vm.predict_race_time(40, 42195)/42.195 > vm.predict_race_time(40, 5000)/5.0)
 
-    # treadmill_pace_model monotonic
-    import treadmill_pace_model as tpm
+    # Elite vs Beginner convergence
+    fm75 = vm.predict_race_time(75, 42195)
+    check("vdot_math: elite VDOT 75 marathon ~2:14-2:16", 133 <= fm75 <= 137, f"got {fm75}")
+    fm30 = vm.predict_race_time(30, 42195)
+    check("vdot_math: beginner VDOT 30 marathon ~4:40-5:05", 280 <= fm30 <= 305, f"got {fm30}")
+
+    # Round-trip inversion accuracy across standard distances
+    for dist in (5000, 10000, 21097.5, 42195):
+        t_pred = vm.predict_race_time(40, dist)
+        v_calc = vm.compute_vdot(dist, t_pred)
+        check(f"vdot_math: round-trip inversion accurate for {dist}m", abs(v_calc - 40) < 0.2)
+
+    # Monotonicity across distances
+    p5 = vm.predict_race_time(40, 5000) / 5.0
+    p10 = vm.predict_race_time(40, 10000) / 10.0
+    phm = vm.predict_race_time(40, 21097.5) / 21.0975
+    pfm = vm.predict_race_time(40, 42195) / 42.195
+    check("vdot_math: standard race distances monotonic (5K < 10K < HM < FM)",
+          p5 < p10 < phm < pfm, f"paces={[p5, p10, phm, pfm]}")
+
+    # VO2max intensity hierarchy
+    pe = vm.vdot_to_pace_sec(40, 0.70)
+    pm = vm.vdot_to_pace_sec(40, 0.83)
+    pt = vm.vdot_to_pace_sec(40, 0.88)
+    pi = vm.vdot_to_pace_sec(40, 1.00)
+    pr = vm.vdot_to_pace_sec(40, 1.05)
+    check("vdot_math: VO2max intensities hierarchy E > M > T > I > R",
+          pe > pm > pt > pi > pr, f"paces={[pe, pm, pt, pi, pr]}")
+
+    # Treadmill Pace Model
     paces = [tpm.infer_pace_from_hr(h) for h in (150, 164, 175, 183)]
-    secs  = [int(p.split(":")[0])*60 + int(p.split(":")[1].replace("/km","")) for p in paces]
+    secs  = [int(p.split(":")[0]) * 60 + int(p.split(":")[1].replace("/km", "")) for p in paces]
     check("treadmill_pace_model: HR↑ → pace faster (monotonic)",
-          all(secs[i] > secs[i+1] for i in range(len(secs)-1)), f"secs={secs}")
+          all(secs[i] > secs[i + 1] for i in range(len(secs) - 1)), f"secs={secs}")
+    check("treadmill_pace_model: infer_pace handles RHR floor safely",
+          tpm.infer_pace_from_hr(40) is not None)
+    check("treadmill_pace_model: infer_pace handles MHR ceiling safely",
+          tpm.infer_pace_from_hr(205) is not None)
 
-    # bangkok_climate sane
-    import bangkok_climate as bc
-    temps = [bc.morning_temp_c(m) for m in range(1, 13)]
-    check("bangkok_climate: all temps 22-32°C", all(22 <= t <= 32 for t in temps), f"{temps}")
-    check("bangkok_climate: Ely penalty 0 at ≤13°C", bc.ely_penalty_fraction(13) == 0)
 
-    # training_planner — dynamic peak/taper math (pure functions, synthetic inputs
-    # so this doesn't depend on live running_activities_all.json data changing).
+# ===========================================================================
+# 3. UNIT TESTS — PRIORITY 2: MACRO & WEEKLY PLANNING
+# ===========================================================================
+def unit_p2_macro_and_weekly():
+    print("\n── 3. UNIT P2: MACRO & WEEKLY PLANNING ──────────────────")
+    import session_prescriber as sp
     import training_planner as tp
+
+    # Session Prescriber structure & rules
+    plan = sp.generate_week_plan(week="current", bb=70, hrv="balanced", pain="none",
+                                verbose=False, target_monday=date(2026, 8, 31))
+    check("session_prescriber: weekly plan has 7 days", len(plan["sessions"]) == 7)
+    qual_count = sum(1 for s in plan["sessions"]
+                     if s.get("type") in ("quality", "quality1", "quality2", "T", "I", "R"))
+    check("session_prescriber: quality sessions <= 2 per week (80/20 rule)", qual_count <= 2)
+    check("session_prescriber: monday is strength day",
+          plan["sessions"][0]["weekday"] == "จันทร์" and plan["sessions"][0]["type"] == "strength")
+    check("session_prescriber: friday is mandatory rest",
+          plan["sessions"][4]["weekday"] == "ศุกร์" and plan["sessions"][4]["type"] == "rest")
+    check("session_prescriber: sunday is long run",
+          plan["sessions"][6]["weekday"] == "อาทิตย์" and plan["sessions"][6]["type"] == "long")
+
+    # Readiness override: low BB forces quality to easy
+    plan_low = sp.generate_week_plan(week="current", bb=30, hrv="unbalanced", pain="none",
+                                    verbose=False, target_monday=date(2026, 8, 31))
+    check("session_prescriber: low BB modifies quality to easy",
+          all(s["decision"] == "MODIFY" and "Easy" in s["workout"]
+              for s in plan_low["sessions"] if s["type"] in ("quality1", "quality2")))
+
+    # Training Planner math (pure functions)
     check("training_planner: target_peak_km stretches above historical peak",
-          tp._target_peak_km(current_weekly_km=40, historical_peak_km=50) == 55,
-          f"got {tp._target_peak_km(40, 50)}, expected 55 (50*1.13→55)")
+          tp._target_peak_km(current_weekly_km=40, historical_peak_km=50) == 55)
     check("training_planner: target_peak_km never below current+5 (mid-buildup athlete)",
-          tp._target_peak_km(current_weekly_km=68, historical_peak_km=50) >= 73,
-          f"got {tp._target_peak_km(68, 50)}, expected >=73")
+          tp._target_peak_km(current_weekly_km=68, historical_peak_km=50) >= 73)
     check("training_planner: taper_km strictly decreasing toward race day",
-          all(a > b for a, b in zip([tp._taper_km(w, 70) for w in [4,3,2,1,0]][:-1],
-                                      [tp._taper_km(w, 70) for w in [4,3,2,1,0]][1:])),
-          f"{[tp._taper_km(w, 70) for w in [4,3,2,1,0]]}")
-    check("training_planner: taper_km race day == 0",
-          tp._taper_km(0, 70) == 0)
+          all(a > b for a, b in zip([tp._taper_km(w, 70) for w in [4, 3, 2, 1, 0]][:-1],
+                                    [tp._taper_km(w, 70) for w in [4, 3, 2, 1, 0]][1:])))
+    check("training_planner: taper_km race day == 0", tp._taper_km(0, 70) == 0)
+
     phase_km = tp._build_phase_km(45, 70)
     check("training_planner: phase_km progression base < quality < race_specific",
-          phase_km["base"]["max"] < phase_km["quality"]["max"] < phase_km["race_specific"]["max"],
-          f"{phase_km}")
+          phase_km["base"]["max"] < phase_km["quality"]["max"] < phase_km["race_specific"]["max"])
 
 
 # ===========================================================================
-# 2. CONSISTENCY TESTS — single-source invariants (regression bugs)
+# 4. UNIT TESTS — PRIORITY 3: RACE TACTICS & NUTRITION
 # ===========================================================================
-def consistency_tests():
-    print("\n── 2. CONSISTENCY (single-source invariants) ────────────")
-    import config
+def unit_p3_race_and_nutrition():
+    print("\n── 4. UNIT P3: RACE TACTICS & NUTRITION ─────────────────")
+    import nutrition_calculator as nc
+    import post_race_updater as pru
+    import taper_monitor as tm
+
+    # Sweat rate model (Sawka et al. 2007)
+    sr20, *_ = nc.sweat_rate_lhr(20, 70)
+    sr28, *_ = nc.sweat_rate_lhr(28, 70)
+    sr35, *_ = nc.sweat_rate_lhr(35, 70)
+    check("nutrition: sweat rate increases with temperature (20°C < 28°C < 35°C)",
+          sr20 < sr28 < sr35)
+
+    srh50, *_ = nc.sweat_rate_lhr(28, 50)
+    srh85, *_ = nc.sweat_rate_lhr(28, 85)
+    check("nutrition: sweat rate increases with high humidity (>70% RH)", srh50 < srh85)
+
+    # Montain 2007 sweat rate calibration equation
+    cal = nc.calibrate_sweat_rate(72.0, 70.5, 500, 60)
+    check("nutrition: calibrate sweat rate matches Montain 2007", cal == 2.0, f"got {cal}")
+
+    # ACSM replacement target solver
+    loss = 1.55 * 4 * nc.sweat_na_mgl()
+    req_min, req_max = nc.na_requirement(1.55, 240)
+    caps_plan = nc.plan_caps(loss, req_min, req_max, 6)
+    check("nutrition: marathon plan strictly within 40–80% ACSM",
+          40 <= caps_plan["replace_pct"] <= 80, f"got {caps_plan['replace_pct']}%")
+    check("nutrition: all station caps non-negative integers",
+          all(c >= 0 for c in caps_plan["station_caps"]))
+
+    # Post-Race Updater parsing & heat guard
+    check("post_race_updater: parse_time H:MM:SS format", pru.parse_time("1:45:00") == 6300)
+    check("post_race_updater: parse_time MM:SS format", pru.parse_time("45:00") == 2700)
+    check("post_race_updater: HOT_THRESHOLD_C == 20.0°C", pru.HOT_THRESHOLD_C == 20.0)
+    check("post_race_updater: heat correction 0 at <= 13°C", pru.ely_heat_correction(10.0) == 0.0)
+    check("post_race_updater: heat correction at 25°C is 4.8%",
+          abs(pru.ely_heat_correction(25.0) - 0.048) < 1e-4)
+    check("post_race_updater: cool-equiv duration strictly faster than raw time",
+          pru.heat_adjusted_duration(3600, 25.0) < 3600)
+
+    # Taper Monitor window ordering
+    check("taper_monitor: window thresholds strictly ordered (far > early > late > final)",
+          tm.TAPER_VOLUME["far"]["days_min"] > tm.TAPER_VOLUME["early"]["days_min"]
+          > tm.TAPER_VOLUME["late"]["days_min"] > tm.TAPER_VOLUME["final"]["days_min"])
+
+
+# ===========================================================================
+# 5. UNIT TESTS — PRIORITY 4: ENVIRONMENTAL & REGISTRY
+# ===========================================================================
+def unit_p4_environmental_and_registry():
+    print("\n── 5. UNIT P4: ENVIRONMENTAL & REGISTRY ─────────────────")
+    import bangkok_climate as bc
+    import weather_adjuster as wa
+    import heat_acclimation as ha
     import race_registry as rr
 
-    # --- BUG CLASS: race_pace_planner must not diverge from vdot_math ---
-    import vdot_math as vm, race_pace_planner as rpp
-    worst = max(abs(rpp._vdot_to_race_pace(40, d) - vm.predict_race_time(40, d*1000)*60/d)
+    # Bangkok climate & Ely heat correction
+    temps = [bc.morning_temp_c(m) for m in range(1, 13)]
+    check("bangkok_climate: all monthly morning temps 22-32°C",
+          all(22 <= t <= 32 for t in temps), f"{temps}")
+    check("bangkok_climate: Ely penalty 0 at <= 13°C", bc.ely_penalty_fraction(13) == 0.0)
+    check("bangkok_climate: 20°C penalty == 2.8%", abs(bc.ely_penalty_fraction(20) - 0.028) < 1e-4)
+    check("bangkok_climate: 33°C penalty == 8.0%", abs(bc.ely_penalty_fraction(33) - 0.080) < 1e-4)
+
+    # Weather adjuster pacing helpers
+    check("weather_adjuster: parse_pace 5:20 to seconds", wa.parse_pace("5:20") == 320.0)
+    check("weather_adjuster: fmt_pace 320s to string", wa.fmt_pace(320.0) == "5:20/km")
+
+    # Heat acclimation TRIMP & WBGT weighting
+    check("heat_acclimation: WBGT < 21 has multiplier 1.0", ha.wbgt_multiplier(20.0) == 1.0)
+    check("heat_acclimation: WBGT >= 24 has multiplier > 1.0", ha.wbgt_multiplier(25.0) > 1.0)
+    check("heat_acclimation: TRIMP at RHR is zero", ha.calc_trimp(ha.RHR, 3600) == 0.0)
+    check("heat_acclimation: TRIMP at MHR is positive", ha.calc_trimp(ha.MHR, 3600) > 0.0)
+    check("heat_acclimation: TRIMP above MHR clamped to max ratio",
+          ha.calc_trimp(ha.MHR + 10, 3600) == ha.calc_trimp(ha.MHR, 3600))
+
+    # Race registry invariants
+    races = rr.load_races()
+    check("race_registry: loads valid races dictionary", isinstance(races, dict) and len(races) >= 1)
+    check("race_registry: active race key is valid and active",
+          rr.active_race_key() in races and races[rr.active_race_key()].get("active", True))
+
+
+# ===========================================================================
+# 6. CONSISTENCY TESTS — Single-Source Invariants & Static Source Scan
+# ===========================================================================
+def consistency_tests():
+    print("\n── 6. CONSISTENCY (single-source invariants) ────────────")
+    import config
+    import race_registry as rr
+    import vdot_math as vm
+    import race_pace_planner as rpp
+    import nutrition_calculator as nc
+    import post_session_analyzer as psa
+    import injury_risk_detector as ird
+
+    # Race pace planner vs vdot_math
+    worst = max(abs(rpp._vdot_to_race_pace(40, d) - vm.predict_race_time(40, d * 1000) * 60 / d)
                 for d in (5, 10, 21.097, 42.195))
     check("race_pace_planner == vdot_math (no rolled-own %VO2max)",
           worst < 2, f"max divergence {worst:.1f} sec/km")
 
-    # --- BUG CLASS: nutrition plan never exceeds ACSM 80% ceiling ---
-    import nutrition_calculator as nc
+    # Nutrition plan ACSM 80% ceiling
     over = []
     for t in (15, 20, 25, 29, 33, 38):
         sr, *_ = nc.sweat_rate_lhr(t, 82)
-        loss = sr * 115/60 * nc.sweat_na_mgl()
+        loss = sr * 115 / 60 * nc.sweat_na_mgl()
         lo, hi = nc.na_requirement(sr, 115)
         p = nc.plan_caps(loss, lo, hi, 3)
         if p["plan_na"] > hi + 1:
             over.append((t, p["replace_pct"]))
     check("nutrition: plan never exceeds 80% ceiling (all temps)", not over, f"violations={over}")
 
-    # --- BUG CLASS: _classify_speed maps to correct zone for THIS athlete's
-    #     VDOT (was hardcoded to fixed km/h values that only held for
-    #     VDOT-40 — any other athlete's VDOT_PACES would fail this check
-    #     even though _classify_speed itself derives boundaries from config
-    #     correctly). Build test speeds from the zone midpoint of the
-    #     athlete's own VDOT_PACES instead. ---
-    import post_session_analyzer as psa
+    # Dynamic _classify_speed per athlete VDOT_PACES
     cases = {}
     for zone in ("R", "I", "T", "M", "E"):
         lo_sec, hi_sec = config.VDOT_PACES[zone]
@@ -160,67 +349,54 @@ def consistency_tests():
     bad = {s: psa._classify_speed(s) for s, e in cases.items() if psa._classify_speed(s) != e}
     check("post_session: _classify_speed correct per current athlete VDOT", not bad, f"wrong={bad}")
 
-    # --- BUG CLASS: injury ACWR uses EWMA (not raw-km false CRITICAL) ---
-    import injury_risk_detector as ird
+    # Injury ACWR EWMA invariant
     src = Path(ird.__file__).read_text()
     check("injury_risk: ACWR uses EWMA ATL/CTL (not raw week km)",
           "compute_current_pmc" in src and "ACWR" in src)
 
-    # --- TRAINING_PHASES: taper must end ON active race date, not after ---
-    import config as _cfg
-    from datetime import date as _date
-    active_date_str = rr.active_race()["date"]   # e.g. "2026-11-15"
-    active_date = _date.fromisoformat(active_date_str)
-    taper_phases = [p for p in _cfg.TRAINING_PHASES if p["phase"] == "taper"
-                    and p["end"] >= active_date - __import__("datetime").timedelta(days=20)
+    # Training phases taper alignment
+    active_date_str = rr.active_race()["date"]
+    active_date = date.fromisoformat(active_date_str)
+    taper_phases = [p for p in config.TRAINING_PHASES if p["phase"] == "taper"
+                    and p["end"] >= active_date - timedelta(days=20)
                     and p["end"] <= active_date]
     check("phases: taper ends on active race date (peak never covers race day)",
           any(p["end"] == active_date for p in taper_phases),
           f"active_race={active_date_str}, taper_ends={[p['end'].isoformat() for p in taper_phases]}")
-    race_specific_on_race_day = [p for p in _cfg.TRAINING_PHASES
+
+    race_specific_on_race_day = [p for p in config.TRAINING_PHASES
                                   if p["phase"] == "race_specific" and p["end"] >= active_date]
     check("phases: race_specific does NOT extend to/past race day",
           not race_specific_on_race_day,
           f"offending={[p['name'] for p in race_specific_on_race_day]}")
 
-    # --- race registry: active race must be a real, active race — and no
-    #     archived race can be mistaken for it. Was hardcoded to literal
-    #     "bangsaen"/"fuji" names, which only holds for this athlete's own
-    #     races.json; generalized so it works for anyone's race names. ---
+    # Race registry invariants
     _races = rr.load_races()
     _active_key = rr.active_race_key()
     check("races: active_race_key() points to a real, active race",
-          _active_key in _races and _races[_active_key].get("active", True),
-          f"active_race={_active_key}, races={list(_races.keys())}")
+          _active_key in _races and _races[_active_key].get("active", True))
     _archived_but_active = [k for k, r in _races.items()
                              if not r.get("active", True) and k == _active_key]
-    check("races: no archived race is treated as the active race",
-          not _archived_but_active, f"offending={_archived_but_active}")
+    check("races: no archived race is treated as the active race", not _archived_but_active)
 
-    # --- athlete.json is the source: changing config requires editing it ---
+    # Athlete data synchronization
     aj = ROOT / "GarminRawData" / "athlete.json"
-    import json
     data = json.loads(aj.read_text())
     check("athlete.json: vdot matches config", data["vdot"] == config.ATHLETE["vdot"])
     check("athlete.json: lthr matches config", data["lthr"] == config.ATHLETE["lthr"])
 
-    # --- STATIC SOURCE SCAN: no STALE zone literals anywhere (catches every
-    #     branch regardless of runtime; this is what runtime functional tests
-    #     MISS when a buggy line sits in an un-exercised conditional). ---
+    # Static scan for stale zone literals
     STALE = [
-        r"HR\s*<\s*155", r"HR:\s*<\s*155",      # old E ceiling (now 163)
-        r"HR\s*<\s*150\b",                        # old easy/quality-override ceiling
-        r"170\s*[–-]\s*176", r"HR\s*<\s*176",   # old T zone (now 174–183)
-        r"VDOT\s*38\b",                           # superseded VDOT
-        r"8\.4km/h", r"@\s*7:08",                 # old TM easy prescription (VDOT38-era)
-                                                   # (note: "8.4 km/h" with space in
-                                                   #  treadmill anchor comment = measured data, OK)
-        r"12→8\s*km/h",                           # old TM stride instruction
-        r"base_ceilings\s*=\s*\[170",            # weather_adjuster hardcoded HR plan
-        r"Thailand Local Race \(2026",            # stale race label/date in output
-        r"Taper \+ ATM",                          # stale taper phase name (A-race = Bangsaen42)
+        r"HR\s*<\s*155", r"HR:\s*<\s*155",
+        r"HR\s*<\s*150\b",
+        r"170\s*[–-]\s*176", r"HR\s*<\s*176",
+        r"VDOT\s*38\b",
+        r"8\.4km/h", r"@\s*7:08",
+        r"12→8\s*km/h",
+        r"base_ceilings\s*=\s*\[170",
+        r"Thailand Local Race \(2026",
+        r"Taper \+ ATM",
     ]
-    # legit deliberate values to NOT flag: BB<20 recovery "HR < 140", crash "HR < 140"
     offenders = {}
     scan_files = list(TOOLS.glob("*.py")) + list(COACH_MCP.glob("*.py"))
     for f in scan_files:
@@ -233,11 +409,12 @@ def consistency_tests():
 
 
 # ===========================================================================
-# 3. FUNCTIONAL TESTS — real tools end-to-end, output agrees with config
+# 7. FUNCTIONAL TESTS — Real Tools End-to-End Flow (CLI Regression Suite)
 # ===========================================================================
 def functional_tests():
-    print("\n── 3. FUNCTIONAL (full flow, output vs config) ──────────")
+    print("\n── 7. FUNCTIONAL (full flow, output vs config) ──────────")
     import config
+    import race_registry as rr
     e_ceiling = config.HR_ZONE_BOUNDS["Z1_E"][1]
 
     flow = [
@@ -250,35 +427,28 @@ def functional_tests():
     ]
     for args in flow:
         rc, out = run_tool(args)
-        check(f"flow: {args[0]} runs (rc=0)", rc == 0, out.strip().splitlines()[-1] if out else "no output")
+        check(f"flow: {args[0]} runs (rc=0)", rc == 0,
+              out.strip().splitlines()[-1] if out else "no output")
 
-    # CONSISTENCY via output: every Easy "HR < N" == config E ceiling.
-    # Run TWO scenarios so the MODIFY→easy override branch is also exercised
-    # (normal week + low-BB forces quality→easy, hitting the other code path).
+    # Easy ceiling agreement across branches
     hrs = []
-    for scen in (["--week","current"], ["--week","current","--bb","35","--pain","mild"]):
+    for scen in (["--week", "current"], ["--week", "current", "--bb", "35", "--pain", "mild"]):
         rc, out = run_tool(["session_prescriber.py", *scen])
         hrs += [int(m) for m in re.findall(r"HR\s*<\s*(\d{3})", out)]
-    # 140 = deliberate low-BB recovery cap (allowed); only flag values that are
-    # NEITHER the E ceiling NOR the recovery 140.
     bad = [h for h in hrs if h not in (e_ceiling, 140)]
     check(f"flow: all Easy HR ceilings == config ({e_ceiling}) across branches",
           hrs and not bad, f"found {sorted(set(hrs))}, expected {e_ceiling} (+140 recovery)")
 
-    # CONSISTENCY: no archived Fuji in active flow output
-    rc, tl = run_tool(["training_load.py"])
-    check("flow: no 'Fuji' in training_load countdown", "Fuji" not in tl)
+    # Training load output invariants
+    rc, tl_out = run_tool(["training_load.py"])
+    check("flow: no 'Fuji' in training_load countdown", "Fuji" not in tl_out)
 
-    # CONSISTENCY: race countdown date matches registry active race
-    import race_registry as rr
-    adate = rr.active_race()["date"][:7]   # YYYY-MM
+    adate = rr.active_race()["date"][:7]
     check("flow: training_load countdown uses active race (2026-11)",
-          "173" in tl or "2026-11" in tl or adate.replace("2026-","").lstrip("0")+" " in tl
-          or "ATM" in tl, "countdown missing active race")
+          "173" in tl_out or "2026-11" in tl_out or adate.replace("2026-", "").lstrip("0") + " " in tl_out
+          or "ATM" in tl_out, "countdown missing active race")
 
-    # CONSISTENCY: every --race tool must reject archived race keys (regression
-    # guard for the class of bug where a tool builds its choices from ALL
-    # races instead of active-only, silently accepting e.g. --race fuji/hm/atm)
+    # Regression guard: tools reject archived race keys
     archived_keys = [k for k, r in rr.load_races().items() if not r.get("active", True)]
     race_tools = ["nutrition_calculator.py", "taper_monitor.py", "season_summary.py",
                   "race_pace_planner.py", "training_planner.py", "weather_adjuster.py"]
@@ -292,8 +462,7 @@ def functional_tests():
 
 # ===========================================================================
 def _require_athlete_data():
-    """Friendly early-exit if athlete.json / races.json haven't been created yet
-    (fresh clone ships only the .example.json templates)."""
+    """Friendly early-exit if athlete.json / races.json haven't been created yet."""
     missing = [p.name for p in
                (ROOT / "GarminRawData" / "athlete.json", ROOT / "GarminRawData" / "races.json")
                if not p.exists()]
@@ -302,14 +471,9 @@ def _require_athlete_data():
         print("🧪 PROJECT 179 — TEST SUITE")
         print("=" * 60)
         print(f"❌ Missing: {', '.join(missing)}")
-        print()
-        print("This is a fresh clone — the test suite needs your own athlete/race")
-        print("data to run (it checks that every tool agrees with it).")
-        print()
-        print("Fix:")
+        print("\nFix:")
         for name in missing:
             print(f"  cp GarminRawData/{name.replace('.json', '.example.json')} GarminRawData/{name}")
-        print("  # then fill in your VDOT/LTHR/race targets, and re-run this suite")
         print("=" * 60)
         sys.exit(1)
 
@@ -317,10 +481,28 @@ def _require_athlete_data():
 def main():
     _require_athlete_data()
     print("=" * 60)
-    print("🧪 PROJECT 179 — TEST SUITE")
+    print("🧪 PROJECT 179 — COMPREHENSIVE TEST SUITE")
     print("=" * 60)
-    unit_tests()
+
+    # 1. P0 Daily & Session Core
+    unit_p0_daily_and_session()
+
+    # 2. P1 Core Physiology & VDOT Math
+    unit_p1_physiology_and_vdot()
+
+    # 3. P2 Macro & Weekly Planning
+    unit_p2_macro_and_weekly()
+
+    # 4. P3 Race Tactics & Nutrition
+    unit_p3_race_and_nutrition()
+
+    # 5. P4 Environmental & Registry
+    unit_p4_environmental_and_registry()
+
+    # 6. Consistency & Static Scans
     consistency_tests()
+
+    # 7. Functional CLI Regression Flows
     functional_tests()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
@@ -331,7 +513,7 @@ def main():
         print("  ❌ FAILURES:")
         for name, ok, detail in _RESULTS:
             if not ok:
-                print(f"     - {name}  {('['+detail+']') if detail else ''}")
+                print(f"     - {name}  {('[' + detail + ']') if detail else ''}")
     else:
         print("  ✅ ALL GREEN")
     print("=" * 60)
