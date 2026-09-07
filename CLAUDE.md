@@ -112,7 +112,7 @@ bash run_post_quality.sh             # หลังวิ่ง Quality → anal
 > System python ไม่มี Garmin library → fetch Body Battery/HRV fail → ไปประเมินจากความรู้สึกแทน + PMC คำนวณจาก data ไม่ครบ → **TSB/ตัวเลขเพี้ยน** (เคยเจอ +14.4 แทน +6.5). ตัวเลขที่เพี้ยนแบบนี้ถ้าหลุดไปคลิป/อัดช่อง = ผิดต่อหน้าคนดู.
 > รันให้ถูก (จาก `GarminRawData/tools/`):
 > ```bash
-> PYTHONPATH="../../skills/garmin_coach_mcp" ../../.venv/bin/python3.13 daily_brief.py
+> ../../.venv/bin/python3.13 daily_brief.py
 > ```
 > ถ้า output ขึ้น "ดึง Garmin ไม่ได้/ติด library" หรือ "[cache]" ทั้งที่ควร live → แปลว่ารันผิด interpreter, อย่าเชื่อตัวเลข ให้รันใหม่ด้วย venv.
 
@@ -130,8 +130,8 @@ cd GarminRawData/tools
 ../../.venv/bin/python3.13 injury_risk_detector.py --json
 ../../.venv/bin/python3.13 vdot_estimator.py
 ../../.venv/bin/python3.13 energy_efficiency_scorer.py
-# Analysis tools (PYTHONPATH needed for weather_adjuster):
-PYTHONPATH="../../skills/garmin_coach_mcp" ../../.venv/bin/python3.13 weather_adjuster.py --race sponsor21 --manual --temp 27 --humidity 82 --wind 1.5 --dew 21 --base-pace 5:07
+# Analysis tools:
+../../.venv/bin/python3.13 weather_adjuster.py --race sponsor21 --manual --temp 27 --humidity 82 --wind 1.5 --dew 21 --base-pace 5:07
 ../../.venv/bin/python3.13 hrv_trend.py --days 60
 ../../.venv/bin/python3.13 sleep_correlator.py --insight
 ../../.venv/bin/python3.13 training_planner.py --race bangsaen

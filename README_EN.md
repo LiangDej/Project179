@@ -32,10 +32,12 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 ```bash
 git clone https://github.com/LiangDej/Project179.git
 cd Project179
-python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
-> **Windows:** the venv/interpreter path differs from Mac/Linux — use `.venv\Scripts\python.exe` instead of `.venv/bin/python3.13` everywhere in this doc (e.g. `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
+> Requires **Python 3.10 or newer** (3.13 recommended) — if your machine has multiple versions installed, use `python3.13 -m venv .venv` (or 3.11/3.12) instead of `python3` to pin the exact version.
+>
+> **Windows:** the venv/interpreter path differs from Mac/Linux — use `.venv\Scripts\python.exe` instead of `.venv/bin/python3` everywhere in this doc (e.g. `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
 >
 > **⚠️ Garmin login may fail on a Cloud VM/VPS** (AWS EC2, DigitalOcean, a GitHub Actions runner, Replit, **including Google Colab**) — Garmin Connect often blocks datacenter IP ranges via its Cloudflare WAF (login fails even with correct credentials). This is a commonly-reported issue with unofficial Garmin API libraries in general, but **not verified to affect every provider** (including Colab, despite the table above listing it as fully working — if login fails on any cloud provider, suspect this first). Safest is running from a residential IP at home (a real Mac/PC/WSL machine).
 
@@ -394,8 +396,8 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 ```bash
 # Run after any change to tools, config.py, athlete.json, or races.json
-.venv/bin/python3.13 GarminRawData/tests/test_suite.py
-# 30 checks: UNIT + CONSISTENCY + FUNCTIONAL — exit 0 = all green
+.venv/bin/python3 GarminRawData/tests/test_suite.py
+# UNIT + CONSISTENCY + FUNCTIONAL checks — exit 0 = all green
 ```
 
 **Protected files** (a convention for AI coding assistants during a live coaching session — see [CLAUDE.md](CLAUDE.md); human contributors should just open a PR normally):
@@ -415,6 +417,8 @@ Two `requirements.txt` files exist: the **root one is authoritative** (full set,
 - **ACWR via EWMA** — injury risk from ATL/CTL ratio
 - **ACSM Sawka 2007** — sweat-rate calibrated Na replacement
 - Paces and zones update automatically when `athlete.json` changes — no code edits needed
+
+Full formula details (baseline, stretch factor, phase ratios, taper curve) live in [`GarminRawData/TRAINING_PLAN_METHODOLOGY.md`](GarminRawData/TRAINING_PLAN_METHODOLOGY.md)
 
 ---
 
