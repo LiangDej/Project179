@@ -28,6 +28,8 @@ Usage:
     health = get_health_cached(client, "2026-05-10")
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

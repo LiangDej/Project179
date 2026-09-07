@@ -15,6 +15,8 @@ Usage:
 Called automatically by post_session_analyzer via auto_log().
 """
 
+from __future__ import annotations
+
 import sys
 import os
 import json

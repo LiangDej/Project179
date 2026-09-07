@@ -14,6 +14,8 @@ Raw Garmin data (running_activities_all.json) is NEVER modified.
 Run automatically from run_post_quality.sh (Step 1.5).
 """
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

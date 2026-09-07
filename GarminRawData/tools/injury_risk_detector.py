@@ -18,6 +18,8 @@ Usage:
     python3 injury_risk_detector.py --json
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import argparse

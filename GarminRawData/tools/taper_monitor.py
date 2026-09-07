@@ -16,6 +16,8 @@ Usage:
     python3 taper_monitor.py --race sponsor21    # เลือก race (bangsaen หรือ sponsor21)
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import argparse

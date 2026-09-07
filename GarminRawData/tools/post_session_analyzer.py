@@ -10,6 +10,8 @@ Usage:
     python3 post_session_analyzer.py --latest --update-log   # บันทึกผลลง session log
 """
 
+from __future__ import annotations
+
 import os
 import re
 import sys

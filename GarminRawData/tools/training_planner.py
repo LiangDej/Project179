@@ -7,6 +7,8 @@ Usage:
     python3 training_planner.py --race bangsaen --weeks 8
     python3 training_planner.py --race sponsor21 --date 2026-05-17
 """
+
+from __future__ import annotations
 import sys, os, argparse
 from datetime import date, timedelta
 

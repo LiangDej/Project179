@@ -17,6 +17,8 @@ Usage:
     python3 energy_efficiency_scorer.py --json
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import argparse

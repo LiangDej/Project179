@@ -19,6 +19,8 @@ Usage:
     python3 session_prescriber.py --json             # output JSON สำหรับ LLM
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import argparse

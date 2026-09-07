@@ -8,6 +8,8 @@ Usage:
     python3 hrv_trend.py --warn        # overtraining check only
     python3 hrv_trend.py --crash       # HRV crash detector + actionable advice
 """
+
+from __future__ import annotations
 import os, sys, json, argparse
 from datetime import date, timedelta
 from pathlib import Path

@@ -13,6 +13,8 @@ Usage:
     python3 stamina_patcher.py --backfill         # patch all sessions ที่ยังไม่มี stamina
     python3 stamina_patcher.py --status           # show backfill progress (no writes)
 """
+
+from __future__ import annotations
 import sys
 import os
 import json

@@ -19,6 +19,8 @@ Usage:
     python3 race_pace_planner.py --vdot 40 --race sponsor21     # override VDOT
 """
 
+from __future__ import annotations
+
 import sys
 import csv
 import json
