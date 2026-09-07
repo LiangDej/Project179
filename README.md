@@ -12,7 +12,7 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 
 | Agent | Live Garmin data? | วิธีเชื่อม |
 |---|---|---|
-| **Custom agent (recommended)** | ✅ ครบ | clone repo, ตั้ง `PYTHONPATH=skills/garmin_coach_mcp`, รัน tools ผ่าน bash — self-contained ที่สุด ไม่ต้องพึ่งอะไรนอก repo นี้ |
+| **Custom agent (recommended)** | ✅ ครบ | clone repo, รัน tools ผ่าน bash โดยตรง (ไม่ต้องตั้ง `PYTHONPATH` เอง — tools resolve path ให้อัตโนมัติแล้ว) — self-contained ที่สุด ไม่ต้องพึ่งอะไรนอก repo นี้ |
 | **Claude Code / Cowork** | ✅ ครบ | เปิด project folder — agent รัน tools ผ่าน bash เหมือน custom agent ได้ทันที (ไม่ต้องมี MCP server) |
 | **Gemini ผ่าน Google Colab** | ✅ ครบ | Colab มี internet + pip install ได้จริง — `!git clone`, ตั้ง credentials, ดึง Garmin สดได้เหมือน custom agent |
 | **Cursor / GitHub Copilot** | ✅ ครบ | เปิด repo ใน IDE (รันบนเครื่องจริง มี internet ปกติ) — agent อ่าน README เป็น context |
@@ -51,7 +51,24 @@ echo 'GARMIN_PASSWORD=yourpassword'   >> ~/.config/garmin-coach/.env
 
 (ตัวแปรชื่อ `GARMIN_USERNAME` แม้ค่าจะเป็น email ก็ตาม — ดู [`.env.example`](.env.example))
 
-### 3 · Paste prompt นี้ให้ AI agent (แค่นี้พอ)
+> **ถ้าบัญชี Garmin เปิด 2FA (OTP ทางอีเมล):** login ครั้งแรกต้องกรอก OTP แบบ interactive — รันเองครั้งเดียวก่อน (ไม่ใช่ผ่าน AI agent ซึ่งรันแบบ non-interactive กรอก OTP ไม่ได้):
+> ```bash
+> cd GarminRawData/tools && ../../.venv/bin/python3 garmin_client.py --mfa <รหัส 6 หลักจากอีเมล>
+> ```
+> หลังจากนั้นระบบจะ cache session token ไว้ ไม่ต้องกรอก OTP ซ้ำอีกในการรันครั้งถัดๆ ไป (จนกว่า token จะหมดอายุ)
+
+### 3 · ดึงประวัติย้อนหลัง (สำคัญ — ข้ามได้แต่ไม่แนะนำ)
+
+Default ดึงย้อนหลังแค่ 7 วัน ซึ่ง**ไม่พอ**ให้ CTL/TSB (42-day EWMA) น่าเชื่อถือ — ถ้าข้ามขั้นนี้ไป daily brief แรกๆ จะเตือน "ข้อมูลน้อยเกินไป ยังเชื่อ CTL/TSB ไม่ได้" (ตั้งใจให้เตือนแบบนี้ ดีกว่าโชว์เลขมั่วๆ):
+
+```bash
+cd GarminRawData/tools
+../../.venv/bin/python3 ../fetch_incremental.py --lookback-days 90
+```
+
+ดึงประมาณ **90 วัน** พอให้เริ่มเชื่อถือได้ (จะยิ่งแม่นขึ้นเรื่อยๆ เมื่อซ้อมต่อไปเรื่อยๆ จนครบ ~42 วันจริง) — ใช้เวลาสักครู่ (มี rate-limit 1 วินาที/call ในตัวอยู่แล้ว ไม่ต้องกังวลเรื่อง spam บัญชี Garmin) ไม่ต้องขออนุญาตอะไรเพิ่มจาก Garmin — เป็นแค่การเรียก API เดิมซ้ำๆ ย้อนหลังตามช่วงวันที่ที่กำหนด
+
+### 4 · Paste prompt นี้ให้ AI agent (แค่นี้พอ)
 
 ```
 I just cloned Project 179 — Garmin JD Running Coach.
