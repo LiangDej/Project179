@@ -37,6 +37,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 > Requires **Python 3.10 or newer** (3.13 recommended) — if your machine has multiple versions installed, use `python3.13 -m venv .venv` (or 3.11/3.12) instead of `python3` to pin the exact version.
 >
+> **⚠️ Mac:** macOS's default `python3` (from the Xcode Command Line Tools) is usually **3.9**, which is too old (`pip install` will fail immediately, unable to find `anyio==4.13.0`). Check first with `python3 --version` — if it's below 3.10, install a newer one first, e.g. `brew install python@3.13`, then use `python3.13 -m venv .venv` instead.
+>
 > **Windows:** the venv/interpreter path differs from Mac/Linux — use `.venv\Scripts\python.exe` instead of `.venv/bin/python3` everywhere in this doc (e.g. `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
 >
 > **⚠️ Garmin login may fail on a Cloud VM/VPS** (AWS EC2, DigitalOcean, a GitHub Actions runner, Replit, **including Google Colab**) — Garmin Connect often blocks datacenter IP ranges via its Cloudflare WAF (login fails even with correct credentials). This is a commonly-reported issue with unofficial Garmin API libraries in general, but **not verified to affect every provider** (including Colab, despite the table above listing it as fully working — if login fails on any cloud provider, suspect this first). Safest is running from a residential IP at home (a real Mac/PC/WSL machine).
@@ -62,8 +64,7 @@ echo 'GARMIN_PASSWORD=yourpassword'   >> ~/.config/garmin-coach/.env
 The default lookback is only 7 days, which is **not enough** for CTL/TSB (a 42-day EWMA) to be trustworthy — skip this and the first few daily briefs will warn "not enough history yet, CTL/TSB not reliable" (that's intentional — better a clear warning than a confidently wrong number):
 
 ```bash
-cd GarminRawData/tools
-../../.venv/bin/python3 ../fetch_incremental.py --lookback-days 90
+.venv/bin/python3 GarminRawData/fetch_incremental.py --lookback-days 90
 ```
 
 **~90 days** is enough to start trusting the numbers (accuracy keeps improving as you train, until it fully converges around ~42 real days). This takes a little while (there's a built-in 1-second rate limit between calls, so no risk of spamming your Garmin account) — no extra permission needed from Garmin beyond your normal login; it's just the same API called repeatedly over the date range.
