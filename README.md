@@ -37,6 +37,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 > ต้องการ **Python 3.10 ขึ้นไป** (แนะนำ 3.13) — ถ้าเครื่องมีหลายเวอร์ชัน ใช้ `python3.13 -m venv .venv` (หรือ 3.11/3.12) แทน `python3` เพื่อระบุเวอร์ชันชัดเจน
 >
+> **⚠️ Mac:** `python3` เริ่มต้นของ macOS (จาก Xcode Command Line Tools) มักเป็น **3.9** ซึ่งเก่าเกินไป (`pip install` จะ error หา `anyio==4.13.0` ไม่เจอทันที) เช็คก่อนด้วย `python3 --version` — ถ้าต่ำกว่า 3.10 ให้ติดตั้งเวอร์ชันใหม่ก่อน เช่น `brew install python@3.13` แล้วใช้ `python3.13 -m venv .venv` แทน
+>
 > **Windows:** venv/interpreter path ต่างจาก Mac/Linux — ใช้ `.venv\Scripts\python.exe` แทน `.venv/bin/python3` ทุกที่ที่เห็นในเอกสารนี้ (เช่น `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
 >
 > **⚠️ Garmin login อาจ fail บน Cloud VM/VPS** (AWS EC2, DigitalOcean, GitHub Actions runner, Replit, **รวมถึง Google Colab**) — Garmin Connect มักบล็อก IP ของ datacenter ผ่าน Cloudflare WAF (login จะ fail ทั้งที่ credential ถูก) นี่เป็นปัญหาที่พบบ่อยกับ unofficial Garmin API library ทั่วไป แต่**ยังไม่ได้ทดสอบยืนยัน 100% ว่าเกิดกับทุก provider** (รวม Colab ด้วย แม้ตารางด้านบนจะระบุว่า Colab ใช้ได้เต็มรูปแบบ — ถ้าเจอ login fail บน cloud provider ไหนก็ตาม ให้สงสัยเรื่องนี้ก่อน) ปลอดภัยสุดคือรันจาก residential IP ที่บ้าน (Mac/PC/WSL ในเครื่องจริง)
@@ -62,8 +64,7 @@ echo 'GARMIN_PASSWORD=yourpassword'   >> ~/.config/garmin-coach/.env
 Default ดึงย้อนหลังแค่ 7 วัน ซึ่ง**ไม่พอ**ให้ CTL/TSB (42-day EWMA) น่าเชื่อถือ — ถ้าข้ามขั้นนี้ไป daily brief แรกๆ จะเตือน "ข้อมูลน้อยเกินไป ยังเชื่อ CTL/TSB ไม่ได้" (ตั้งใจให้เตือนแบบนี้ ดีกว่าโชว์เลขมั่วๆ):
 
 ```bash
-cd GarminRawData/tools
-../../.venv/bin/python3 ../fetch_incremental.py --lookback-days 90
+.venv/bin/python3 GarminRawData/fetch_incremental.py --lookback-days 90
 ```
 
 ดึงประมาณ **90 วัน** พอให้เริ่มเชื่อถือได้ (จะยิ่งแม่นขึ้นเรื่อยๆ เมื่อซ้อมต่อไปเรื่อยๆ จนครบ ~42 วันจริง) — ใช้เวลาสักครู่ (มี rate-limit 1 วินาที/call ในตัวอยู่แล้ว ไม่ต้องกังวลเรื่อง spam บัญชี Garmin) ไม่ต้องขออนุญาตอะไรเพิ่มจาก Garmin — เป็นแค่การเรียก API เดิมซ้ำๆ ย้อนหลังตามช่วงวันที่ที่กำหนด
