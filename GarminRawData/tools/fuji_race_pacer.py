@@ -317,7 +317,7 @@ def build_fuji_plan(vdot: float, goal_min: float | None,
     print()
 
     print(f"💧 Nutrition (cold weather):")
-    print(f"   Pre-race : Palatinose 30g + iRun 1 tab (T-45min)")
+    print(f"   Pre-race : Palatinose 30g + Prevo 1 แคป (T-45min)")
     print(f"   Race     : Gel every 7km + 200ml water each aid station")
     print(f"   Na       : Prevo 1 แคป/station — ถึงแม้อากาศเย็น Na loss ยังสำคัญ")
     print(f"   ⚠️  อากาศเย็น → ความหิวน้ำลด แต่ร่างกายยัง dehydrate — ดื่มตาม plan !")

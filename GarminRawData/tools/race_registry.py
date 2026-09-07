@@ -65,7 +65,9 @@ def active_race_key() -> str:
         return key
     # Fallback: earliest-dated active race
     actives = list_races(active_only=True)
-    return actives[0][0] if actives else "atm"
+    if actives:
+        return actives[0][0]
+    raise ValueError("No active race found — set 'active_race' or mark a race active:true in races.json")
 
 
 def active_race() -> dict:

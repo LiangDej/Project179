@@ -234,40 +234,58 @@ def build_easy(name, dist_km, pace_slow, pace_fast):
     return wrap_workout(name, steps, est)
 
 
-def build_threshold(name, reps, rep_min, t_slow, t_fast, rec_sec=120):
-    """WU 15min → N×(rep_min T-pace / rec jog) → CD 10min"""
+def build_threshold(name, reps, rep_min, t_slow, t_fast, rec_sec=120, skip_warmup=False):
+    """[WU 15min → 2×stride →] N×(rep_min T-pace / rec jog) → CD 10min
+
+    skip_warmup=True omits both the warmup jog and the 2×stride wake-up
+    (for athletes who warm up and stride out on their own before starting
+    the watch workout) — main set / cooldown unchanged.
+    """
     rep_sec = rep_min * 60
-    rgroup = repeat_group(3, reps, [
-        interval_step(4, 1, secs=rep_sec,
+    order = 1
+    steps = []
+    if not skip_warmup:
+        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {tm_note('7:00', '6:30')}"))
+        order += 1
+        steps.append(active_time_step(order, 120, f"2×stride to wake up legs — {tm_note('5:30', '5:00')}"))
+        order += 1
+    rgroup = repeat_group(order, reps, [
+        interval_step(order + 1, 1, secs=rep_sec,
                       desc=f"T-pace {rep_min}min @ {t_slow}–{t_fast} | {tm_note(t_slow, t_fast)}",
                       pace_slow=t_slow, pace_fast=t_fast),
-        recovery_step(5, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {tm_note('7:00', '6:30')}"),
+        recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {tm_note('7:00', '6:30')}"),
     ])
-    steps = [
-        warmup_step(1, 900, f"Warm up easy 15min — {tm_note('7:00', '6:30')}"),
-        active_time_step(2, 120, f"2×stride to wake up legs — {tm_note('5:30', '5:00')}"),
-        rgroup,
-        cooldown_step(6, 600, f"Cool down easy 10min — {tm_note('7:00', '6:30')}"),
-    ]
-    est = 900 + 120 + reps * (rep_sec + rec_sec) + 600
+    steps.append(rgroup)
+    order += 1
+    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {tm_note('7:00', '6:30')}"))
+    est = (0 if skip_warmup else 1020) + reps * (rep_sec + rec_sec) + 600
     return wrap_workout(name, steps, est)
 
 
-def build_interval(name, reps, rep_dist_m, i_slow, i_fast, rec_sec=180):
-    """WU 15min → N×(dist I-pace / rec jog) → CD 10min"""
-    rgroup = repeat_group(3, reps, [
-        interval_step(4, 1, dist_m=rep_dist_m,
+def build_interval(name, reps, rep_dist_m, i_slow, i_fast, rec_sec=180, skip_warmup=False):
+    """[WU 15min → 2×stride →] N×(dist I-pace / rec jog) → CD 10min
+
+    skip_warmup=True omits both the warmup jog and the 2×stride wake-up
+    (for athletes who warm up and stride out on their own before starting
+    the watch workout) — main set / cooldown unchanged.
+    """
+    order = 1
+    steps = []
+    if not skip_warmup:
+        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {tm_note('7:00', '6:30')}"))
+        order += 1
+        steps.append(active_time_step(order, 120, f"2×stride — {tm_note('5:30', '5:00')}"))
+        order += 1
+    rgroup = repeat_group(order, reps, [
+        interval_step(order + 1, 1, dist_m=rep_dist_m,
                       desc=f"Interval {rep_dist_m}m @ {i_slow}–{i_fast} | {tm_note(i_slow, i_fast)}",
                       pace_slow=i_slow, pace_fast=i_fast),
-        recovery_step(5, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {tm_note('7:00', '6:30')}"),
+        recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {tm_note('7:00', '6:30')}"),
     ])
-    steps = [
-        warmup_step(1, 900, f"Warm up easy 15min — {tm_note('7:00', '6:30')}"),
-        active_time_step(2, 120, f"2×stride — {tm_note('5:30', '5:00')}"),
-        rgroup,
-        cooldown_step(6, 600, f"Cool down easy 10min — {tm_note('7:00', '6:30')}"),
-    ]
-    est = 900 + 120 + reps * (int(rep_dist_m / pace_to_ms(i_fast)) + rec_sec) + 600
+    steps.append(rgroup)
+    order += 1
+    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {tm_note('7:00', '6:30')}"))
+    est = (0 if skip_warmup else 1020) + reps * (int(rep_dist_m / pace_to_ms(i_fast)) + rec_sec) + 600
     return wrap_workout(name, steps, est)
 
 
@@ -328,7 +346,7 @@ def build_tt(name="30-min TT — LT2 Calibration"):
 
 # ── session_prescriber → workout mapper ──────────────────────────────────────
 
-def session_to_workout(session: dict) -> dict | None:
+def session_to_workout(session: dict, skip_warmup: bool = False) -> dict | None:
     stype   = session.get("type", "")
     date_s  = session.get("date", "")
     weekday = session.get("weekday", "")
@@ -374,7 +392,7 @@ def session_to_workout(session: dict) -> dict | None:
             return build_easy(f"Easy {dist:.0f}km — {weekday} {date_s}", dist, e_slow, e_fast)
         reps, rep_min = (int(m_reps.group(1)), int(m_reps.group(2))) if m_reps else (3, 10)
         return build_threshold(f"Quality T {reps}×{rep_min}min — {weekday} {date_s}",
-                               reps, rep_min, t_slow, t_fast)
+                               reps, rep_min, t_slow, t_fast, skip_warmup=skip_warmup)
 
     elif stype == "quality2":
         # Same downgrade check as quality1 above.
@@ -390,7 +408,7 @@ def session_to_workout(session: dict) -> dict | None:
             m_reps = re.search(r"(\d+)[×x]", workout)
             reps = int(m_reps.group(1)) if m_reps else 5
             return build_interval(f"Quality I {reps}×1km — {weekday} {date_s}",
-                                  reps, 1000, i_slow, i_fast)
+                                  reps, 1000, i_slow, i_fast, skip_warmup=skip_warmup)
         elif "Strides" in workout or "strides" in workout:
             m = re.search(r"(\d+(?:\.\d+)?)km", workout)
             dist = float(m.group(1)) if m else 10.0
@@ -400,7 +418,7 @@ def session_to_workout(session: dict) -> dict | None:
             m_reps = re.search(r"(\d+)[×x](\d+)min", workout)
             reps, rep_min = (int(m_reps.group(1)), int(m_reps.group(2))) if m_reps else (3, 10)
             return build_threshold(f"Quality T {reps}×{rep_min}min — {weekday} {date_s}",
-                                   reps, rep_min, t_slow, t_fast)
+                                   reps, rep_min, t_slow, t_fast, skip_warmup=skip_warmup)
 
     elif stype == "easy+strides":
         m = re.search(r"(\d+(?:\.\d+)?)km", workout)
@@ -422,6 +440,8 @@ def main():
     parser.add_argument("--upload", action="store_true", help="Upload + schedule workouts")
     parser.add_argument("--tt",     action="store_true", help="Preview/upload 30-min TT only")
     parser.add_argument("--yes",    action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--no-warmup", action="store_true",
+                         help="Omit the watch-guided warmup jog + stride wake-up on Quality (T/I) workouts — athlete warms up on their own before starting the structured set")
     args = parser.parse_args()
 
     # ── TT mode ──
@@ -477,7 +497,7 @@ def main():
             print(f"\n  {date_s} {weekday} — {icon} {session['label']} (ไม่ upload)")
             continue
 
-        w = session_to_workout(session)
+        w = session_to_workout(session, skip_warmup=args.no_warmup)
         if w:
             est_min = w.estimatedDurationInSecs // 60
             print(f"\n  {date_s} {weekday} — {w.workoutName}")
@@ -529,11 +549,13 @@ def main():
     print(f"\n✅ Done — เช็คได้ใน Garmin Connect calendar\n")
 
 
-def push_weekly_plan_to_garmin(client, plan: dict) -> dict:
+def push_weekly_plan_to_garmin(client, plan: dict, skip_warmup: bool = False) -> dict:
     """
     Push and schedule running workouts from a weekly plan to Garmin Connect.
     Uses an idempotent guard to avoid duplicate uploads.
-    
+
+    skip_warmup=True omits the watch-guided warmup on Quality (T/I) workouts.
+
     Returns:
         dict: A summary of results.
     """
@@ -555,7 +577,7 @@ def push_weekly_plan_to_garmin(client, plan: dict) -> dict:
             results["rest_days"].append(f"{date_s} ({weekday}) - {session.get('label')}")
             continue
             
-        w = session_to_workout(session)
+        w = session_to_workout(session, skip_warmup=skip_warmup)
         if w:
             to_upload.append((date_s, w))
         else:

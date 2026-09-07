@@ -56,8 +56,10 @@ def _build_race_config() -> dict:
             }
         return out
     except Exception:
-        return {"atm": {"name": "ATM Bangkok Marathon 42km", "dist_km": 42.195,
-                        "stations": [6, 12, 18, 24, 30, 36], "default_duration_min": 240}}
+        # Fallback only fires if race_registry itself is broken — must NOT
+        # point at an archived race (old "atm") or the plan silently targets
+        # a race that no longer exists.
+        return {}
 
 RACE_CONFIG = _build_race_config()
 
@@ -202,7 +204,7 @@ def build_plan(race_key: str, temp_c: float, humidity_pct: float,
         c = station_caps[idx]
         na = c * PREVO_NA_MG + AMINOVITAL_NA
         cap_str = f"{c} แคป" if c else "—"
-        print(f"   km {km:<4}  {cap_str:>7}  {na:>5} mg  + Gel (Amino Vital)")
+        print(f"   km {km:<4}  {cap_str:>7}  {na:>5} mg  + Gel")
 
     print()
     print(f"   Plan total: {plan_na} mg Na  ({p['caps_total']} caps + {n_stations} gels)")
@@ -241,7 +243,7 @@ def build_plan(race_key: str, temp_c: float, humidity_pct: float,
 def main():
     parser = argparse.ArgumentParser(description="Race nutrition calculator")
     _rc = list(RACE_CONFIG.keys())
-    parser.add_argument("--race", default=("atm" if "atm" in _rc else _rc[0]), choices=_rc)
+    parser.add_argument("--race", default=(_rc[0] if _rc else None), choices=_rc)
     parser.add_argument("--temp",       type=float, default=27.0)
     parser.add_argument("--humidity",   type=float, default=82.0)
     parser.add_argument("--dew",        type=float, default=21.0)
