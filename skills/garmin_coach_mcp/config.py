@@ -371,31 +371,41 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
         "vdot_calibration": profile.get("vdot_calibration", ATHLETE["vdot_calibration"]),
         "vdot_heat_adj_estimate": profile.get("vdot_heat_adj_estimate", ATHLETE["vdot_heat_adj_estimate"]),
         "tt_scheduled": profile.get("tt_scheduled", ATHLETE["tt_scheduled"]),
+        "lthr": float(profile.get("lthr", ATHLETE["lthr"])),
     }
     athlete_updates["hrr"] = athlete_updates["mhr"] - athlete_updates["rhr"]
     ATHLETE.update(athlete_updates)
-    
-    # Recalculate HR Zones based on new RHR / MHR
+
+    # Recalculate HR Zones based on new RHR / MHR / LTHR
     _rhr = ATHLETE["rhr"]
     _hrr = ATHLETE["hrr"]
     _mhr = ATHLETE["mhr"]
-    
+
+    # %HRR zone ratios — use the profile's own hr_zone_hrr_pct if given,
+    # otherwise the same defaults as the static (single-user) path above.
+    _zp = dict(profile.get("hr_zone_hrr_pct", {"E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95}))
+    # T-ceiling is defined to equal LTHR by definition — auto-derive it from
+    # this athlete's own LTHR instead of trusting a hardcoded 0.921 ratio,
+    # same reasoning as the module-level derivation above (see line ~57).
+    if _hrr > 0:
+        _zp["T"] = (ATHLETE["lthr"] - _rhr) / _hrr
+
     new_hr_zones = [
-        ("Z1 Easy",       _rhr,                    _rhr + int(_hrr * 0.79)),
-        ("Z2 Marathon",   _rhr + int(_hrr * 0.79),  _rhr + int(_hrr * 0.862)),
-        ("Z3 Threshold",  _rhr + int(_hrr * 0.862), _rhr + int(_hrr * 0.921)),
-        ("Z4 Interval",   _rhr + int(_hrr * 0.921), _rhr + int(_hrr * 0.95)),
-        ("Z5 Repetition", _rhr + int(_hrr * 0.95),  _mhr),
+        ("Z1 Easy",       _rhr,                        _rhr + int(_hrr * _zp["E"])),
+        ("Z2 Marathon",   _rhr + int(_hrr * _zp["E"]), _rhr + int(_hrr * _zp["M"])),
+        ("Z3 Threshold",  _rhr + int(_hrr * _zp["M"]), _rhr + int(_hrr * _zp["T"])),
+        ("Z4 Interval",   _rhr + int(_hrr * _zp["T"]), _rhr + int(_hrr * _zp["I"])),
+        ("Z5 Repetition", _rhr + int(_hrr * _zp["I"]), _mhr),
     ]
     HR_ZONES.clear()
     HR_ZONES.extend(new_hr_zones)
 
     HR_ZONE_BOUNDS.update({
-        "Z1_E": (_rhr,                     _rhr + int(_hrr * 0.79)),
-        "Z2_M": (_rhr + int(_hrr * 0.79),  _rhr + int(_hrr * 0.862)),
-        "Z3_T": (_rhr + int(_hrr * 0.862), _rhr + int(_hrr * 0.921)),
-        "Z4_I": (_rhr + int(_hrr * 0.921), _rhr + int(_hrr * 0.95)),
-        "Z5_R": (_rhr + int(_hrr * 0.95),  _mhr),
+        "Z1_E": (_rhr,                        _rhr + int(_hrr * _zp["E"])),
+        "Z2_M": (_rhr + int(_hrr * _zp["E"]), _rhr + int(_hrr * _zp["M"])),
+        "Z3_T": (_rhr + int(_hrr * _zp["M"]), _rhr + int(_hrr * _zp["T"])),
+        "Z4_I": (_rhr + int(_hrr * _zp["T"]), _rhr + int(_hrr * _zp["I"])),
+        "Z5_R": (_rhr + int(_hrr * _zp["I"]), _mhr),
     })
     
     # Recalculate paces mathematically from new VDOT

@@ -283,11 +283,11 @@ Step 4 — Build training block ด้วย VDOT/zones ที่ confirm แล
 
 ## 💊 Nutrition Protocol
 
-**Products:**
-- Gel: [Amino Vital Shot](https://runnercart.com/products/amino-vital-shot) — Na **90mg**/ซอง
+**Products (ตรวจสอบกับ `athlete.json -> nutrition_products` เสมอ — รายการนี้อาจ stale เพราะสินค้าเปลี่ยนได้):**
+- Gel: Active Peak (mixed fruit) — Na **20mg**/ซอง 49g (เปลี่ยนจาก AminoVital Jelly Shot ตั้งแต่ 2026-09-03)
 - Electrolyte: [Prevo Caps EVO](https://runnercart.com/products/prevo-caps-electrolyte-capsules-bcaa) — Na **150mg**/แคป (as Trisodium Citrate 650mg — 650mg is the salt-compound weight, NOT elemental Na; corrected from photo label 2026-08-02), K 50mg, Ca 20mg, Mg 15mg, BCAA 50mg/แคป
 
-> ⚠️ ตัวเลข nutrition ทั้งหมดอ่านจาก `athlete.json` (single source) — `session_prescriber.py` ดึงอัตโนมัติ อย่า hardcode
+> ⚠️ ตัวเลข nutrition ทั้งหมดอ่านจาก `athlete.json` (single source) — `session_prescriber.py`/`daily_brief.py` ดึงอัตโนมัติ อย่า hardcode ชื่อสินค้าหรือค่า Na ในไฟล์นี้ — field names `prevo_*`/`aminovital_*` เป็นแค่ backward-compat key เท่านั้น ไม่ใช่ชื่อสินค้าจริงเสมอไป
 
 | ช่วง | Easy | Quality (T/I/R) | Long Run | Race Day |
 |---|---|---|---|---|
@@ -424,12 +424,13 @@ bash run_post_race.sh hm 1:47:00 --tt-confirmed --apply     # หลัง TT �
 | คำสั่ง | ใช้เมื่อ |
 |---|---|
 | `python3 daily_brief.py` | BB + HRV + TSB + injury risk + แผนวันนี้ |
-| `python3 post_session_analyzer.py --latest` | วิเคราะห์ session ล่าสุดหลังวิ่ง |
+| `python3 post_session_analyzer.py --latest` | วิเคราะห์ session ล่าสุดหลังวิ่ง (Easy run เท่านั้น auto-log ให้) |
+| `python3 post_session_analyzer.py --latest --update-log` | Quality session — **ต้องใส่ `--update-log`** ไม่งั้นจะไม่ถูกบันทึกลง sessions.json/sessions_master.json |
 | `python3 session_logger.py --summary` | ดู quality sessions + VDOT trend |
 | `python3 vdot_estimator.py` | ประเมิน VDOT จาก quality-lap pace (GPS: sessions_master laps, TM: belt_speed) + Ely 30°C heat correction |
 | `python3 race_predictor.py` | ทำนายเวลาแข่งจาก sessions_master |
-| `python3 race_pace_planner.py --race hm` | race plan + split targets |
-| `python3 taper_monitor.py --race hm --bb 72` | ตรวจ taper readiness |
+| `python3 race_pace_planner.py --race sponsor21` | race plan + split targets |
+| `python3 taper_monitor.py --race sponsor21 --bb 72` | ตรวจ taper readiness |
 | `python3 session_prescriber.py --week current` | สร้าง weekly plan |
 | `python3 weekly_load_report.py` | CTL/ATL/TSB weekly summary |
 | `python3 injury_risk_detector.py --json` | ประเมิน injury risk |
@@ -442,12 +443,12 @@ bash run_post_race.sh hm 1:47:00 --tt-confirmed --apply     # หลัง TT �
 | `python3 post_race_updater.py hm H:MM:SS --temp 27` | คำนวณ heat-adj VDOT (dry-run) — ถ้า temp > 20°C บล็อก apply |
 | `python3 post_race_updater.py hm H:MM:SS --temp 27 --apply` | apply → อัปเดตเฉพาะ vdot_heat_adj_estimate |
 | `python3 post_race_updater.py hm 1:47:00 --tt-confirmed --apply` | TT result → apply VDOT จริง → อัปเดต config.py |
-| `python3 weather_adjuster.py --race hm --manual --temp 27 --humidity 82 --wind 1.5 --dew 21 --base-pace 5:07` | WBGT + Ely penalty → adjusted race pace + HR ceilings |
-| `python3 weather_adjuster.py --race hm --forecast` | 3-day forecast lookahead @ race time (ต้อง OPENWEATHER_API_KEY) |
+| `python3 weather_adjuster.py --race sponsor21 --manual --temp 27 --humidity 82 --wind 1.5 --dew 21 --base-pace 5:07` | WBGT + Ely penalty → adjusted race pace + HR ceilings |
+| `python3 weather_adjuster.py --race sponsor21 --forecast` | 3-day forecast lookahead @ race time (ต้อง OPENWEATHER_API_KEY) |
 | `python3 hrv_trend.py [--days 60] [--warn] [--crash]` | HRV baseline + overtraining warning + crash detector (3+ days suppressed → actionable advice) |
 | `python3 sleep_correlator.py [--days 90] [--insight]` | sleep score → next-day HR drift correlation |
 | `python3 training_planner.py --race bangsaen [--weeks N] [--chart]` | season block planner + ASCII bar chart 30-week season visualization |
-| `python3 nutrition_calculator.py --race hm --temp 27 --humidity 82 --duration 115` | sweat rate + Na loss → evidence-based Prevo caps per station |
+| `python3 nutrition_calculator.py --race sponsor21 --temp 27 --humidity 82 --duration 115` | sweat rate + Na loss → evidence-based Prevo caps per station |
 | `python3 nutrition_calculator.py --calibrate --pre_weight 72.0 --post_weight 70.5 --fluid_ml 500 --duration 60` | calibrate personal sweat rate from pre/post weight (Montain 2007) |
 | `python3 stamina_patcher.py [--status\|--backfill\|--id ID]` | patch stamina_drain_pct จาก SessionCache — `--status` ดู progress (20/31, 11 pending) |
 | `python3 session_logger.py --weeks [--n 12]` | weekly km aggregation table (ดู volume trend แยก type + quality count) |
@@ -596,6 +597,29 @@ Action next session: [1 adjustment]
 
 | วันที่ | ประเภท | เพซ(active) | AvgHR | MaxHR | Cadence | Power | GCT | Decoupling | Notes |
 |---|---|---|---|---|---|---|---|---|---|
+| 2026-08-11 | T | 6:15/km | 165 | 184 | 175spm | 314W | 243ms | 9.7% | B 🟡 |
+| 2026-08-04 | T | 5:46/km | 172 | 193 | 176spm | 323W | 244ms | 4.7% | S 🏆 |
+| 2026-07-30 | T | 5:57/km | 170 | 190 | 177spm | 290W | 250ms | 8.2% | B 🟡 🏃 |
+| 2026-07-28 | T | 5:52/km | 170 | 193 | 178spm | 324W | 241ms | 5.0% | A ✅ |
+| 2026-07-14 | T | 5:34/km | 168 | 187 | 170spm | 297W | 256ms | 4.4% | S 🏆 |
+| 2026-07-09 | Tempo | 5:51/km | 167 | 186 | 168spm | 285W | 263ms | 3.7% | A ✅ |
+| 2026-07-01 | T | 5:08/km | 168 | 184 | 166spm | 287W | 263ms | -1.8% | A ✅ 🏃 |
+| 2026-06-23 | Tempo | 5:11/km | 167 | 183 | 168spm | 296W | 258ms | 3.3% | S 🏆 🏃 |
+| 2026-06-14 | E | 6:22/km | 154 | 166 | 156spm | 273W | 283ms | 3.8% | 🏃 |
+| 2026-06-09 | T | 5:03/km | 170 | 187 | 160spm | 262W | 277ms | 3.5% | A ✅ 🏃 |
+| 2026-06-01 | I | 4:55/km | 183 | 194 | 174spm | 334W | 242ms | 6.0% | A ✅ |
+| 2026-05-26 | T | 5:14/km | 163 | 181 | 160spm | 244W | 285ms | 6.8% | B 🟡 🏃 |
+| 2026-05-10 | T | 5:21/km | 174 | 180 | 166spm | 247W | 286ms | 9.1% | B 🟡 🏃 |
+| 2026-05-09 | E | 6:40/km | 150 | 168 | 152spm | 263W | 296ms | -1.7% | 🏃 |
+| 2026-05-07 | I | 5:10/km | 161 | 178 | 158spm | 244W | 289ms | 3.0% | B 🟡 🏃 |
+| 2026-04-30 | T | 5:40/km | 159 | 174 | 154spm | 238W | 297ms | 5.6% | B 🟡 🏃 |
+| 2026-04-22 | T | 6:07/km | 162 | 183 | 162spm | 287W | 274ms | 0.7% | A ✅ |
+| 2026-04-16 | T | 6:02/km | 165 | 181 | 162spm | 290W | 272ms | 2.8% | A ✅ |
+| 2026-04-10 | Tempo | 5:53/km | 161 | 188 | 158spm | 279W | 281ms | 9.6% | B 🟡 🏃 |
+| 2026-04-01 | T | 5:42/km | 165 | 186 | 166spm | 304W | 264ms | 5.7% | A ✅ |
+| 2026-03-25 | T | 5:38/km | 165 | 186 | 168spm | 307W | 261ms | 9.9% | B 🟡 |
+| 2026-03-19 | I | 5:48/km | 166 | 189 | 166spm | 296W | 264ms | 8.5% | B 🟡 |
+| 2026-03-17 | I | 5:41/km | 163 | 191 | 166spm | 302W | 264ms | -0.9% | A ✅ |
 | YYYY-MM-DD | T | x:xx/km | xxx | xxx | xxxspm | xxxW | xxxms | x.x% | A ✅ 🏃 |
 | YYYY-MM-DD | I | x:xx/km | xxx | xxx | xxxspm | xxxW | xxxms | x.x% | A ✅ |
 

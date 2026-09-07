@@ -376,8 +376,12 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
         _save_master(master)
         print(f"✅ Auto-logged (easy) → sessions_master.json | {record['total_km']}km")
     else:
-        # Non-interactive path when rep_speeds provided (UAT/automation)
-        non_interactive = bool(session_result.get("_rep_speeds_override"))
+        # Non-interactive path when rep_speeds provided (UAT/automation), or
+        # when stdin isn't a TTY (headless/agent run) — input() would either
+        # raise EOFError immediately or block forever waiting on a pipe that
+        # never sends data, so skip straight to auto-confirm with the
+        # detected session_type instead of prompting.
+        non_interactive = bool(session_result.get("_rep_speeds_override")) or not sys.stdin.isatty()
         if not non_interactive:
             print(f"\n📝 Session Master — log quality session {activity_id}")
             print("   (Enter ข้ามได้ถ้าไม่ต้องการ log ตอนนี้)")
@@ -394,7 +398,7 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
             if choice in SESSION_TYPES:
                 session_type = SESSION_TYPES[choice][0]
         else:
-            print(f"\n📝 Auto-logging quality session {activity_id} (rep_speeds provided)")
+            print(f"\n📝 Auto-logging quality session {activity_id} (non-interactive, type detected: {session_type})")
 
         treadmill_phases = None
         type_key = (activity_data.get("activityType") or {}).get("typeKey")
@@ -411,8 +415,11 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
                 {"speed_kmh": kmh, "duration_min": 10}
                 for kmh in rep_speeds
             ]
-        elif is_treadmill:
+        elif is_treadmill and not non_interactive:
             treadmill_phases = _prompt_treadmill_phases()
+        # else (treadmill + non_interactive, no rep_speeds given): leave
+        # treadmill_phases=None rather than block on input() with no TTY —
+        # _build_record() already handles a missing phases list.
 
         record = _build_record(activity_data, laps_data, health,
                                session_type=session_type,

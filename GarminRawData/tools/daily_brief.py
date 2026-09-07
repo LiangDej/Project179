@@ -31,8 +31,13 @@ try:
     from race_registry import list_races
     RACE_DATES = [{"name": r["name"], "date": date.fromisoformat(r["date"])}
                   for _, r in list_races(active_only=True)]
+    if not RACE_DATES:
+        raise ValueError("no active races in races.json")
 except Exception:
-    RACE_DATES = [{"name": "🏁 ATM Bangkok Marathon", "date": date(2026, 11, 29)}]
+    # Fallback only fires if race_registry itself is broken/empty — must NOT
+    # point at an archived race (e.g. old "atm") or every tool downstream
+    # silently counts down to a race that no longer exists.
+    RACE_DATES = [{"name": "⚠️ No active race configured — check races.json", "date": date.today() + timedelta(days=365)}]
 
 WEEKLY_PLAN = {
     0: {"day": "จันทร์",   "type": "strength",     "label": "🏋️ Strength & Conditioning",   "note": "งดวิ่ง เสริมกล้ามเนื้อ Functional"},
@@ -44,12 +49,26 @@ WEEKLY_PLAN = {
     6: {"day": "อาทิตย์", "type": "long",         "label": "📏 Long Run",                   "note": "เน้น E-Pace หรือผสม M-Pace"},
 }
 
+# Nutrition protocols — loaded from athlete.json (single source of truth),
+# same pattern as session_prescriber.py. Never hardcode a product name here —
+# athlete.json's quality_nutrition/long_run_nutrition define the real product.
+try:
+    import json as _json_db
+    _aj_db = _json_db.loads((BASE_DIR / "athlete.json").read_text(encoding="utf-8"))
+    _q_db  = _aj_db.get("quality_nutrition", {})
+    _l_db  = _aj_db.get("long_run_nutrition", {}).get("outdoor", {})
+    _q_pre60_db, _q_pre15_db = _q_db.get("pre_60min", "Palatinose 20g"), _q_db.get("pre_15min", "Prevo 1 cap")
+    _l_pre60_db, _l_pre15_db = _l_db.get("pre_60min", "Palatinose 30g"), _l_db.get("pre_15min", "Prevo 1 cap")
+except Exception:
+    _q_pre60_db, _q_pre15_db = "Palatinose 20g", "Prevo 1 cap"
+    _l_pre60_db, _l_pre15_db = "Palatinose 30g", "Prevo 1 cap"
+
 NUTRITION = {
-    "quality1":     "☕ กาแฟดำ + Palatinose 20g (T-60) → 💊 iRun 1 เม็ด + น้ำ 150ml (T-15)",
-    "quality2":     "☕ กาแฟดำ + Palatinose 20g (T-60) → 💊 iRun 1 เม็ด + น้ำ 150ml (T-15)",
+    "quality1":     f"☕ กาแฟดำ + {_q_pre60_db} (T-60) → 💊 {_q_pre15_db} + น้ำ 150ml (T-15)",
+    "quality2":     f"☕ กาแฟดำ + {_q_pre60_db} (T-60) → 💊 {_q_pre15_db} + น้ำ 150ml (T-15)",
     "easy":         "☕ กาแฟดำ เท่านั้น (ไม่ต้องเติม Palatinose)",
     "easy+strides": "☕ กาแฟดำ เท่านั้น (ไม่ต้องเติม Palatinose)",
-    "long":         "☕ กาแฟดำ + Palatinose 20g (T-60) → 💊 iRun 1 เม็ด + น้ำ 150ml (T-15)",
+    "long":         f"☕ กาแฟดำ + {_l_pre60_db} (T-60) → 💊 {_l_pre15_db} + น้ำ 150ml (T-15)",
     "strength":     "โปรตีน 20-30g หลังซ้อม + น้ำ 300ml",
     "rest":         "น้ำเปล่า 2.5L ตลอดวัน ไม่ต้องทำอะไรพิเศษ",
 }
@@ -436,9 +455,9 @@ def main():
             for r in _risks[:3]:
                 print(f"   ⚠️  {r.get('site','')} — {r.get('reason','')}")
         else:
-            print("   Watch: Popliteus + Hamstring ขวา")
+            print("   ไม่มีจุดที่ต้องเฝ้าระวังเป็นพิเศษตอนนี้")
     except Exception:
-        print("   ⚠️  ไม่สามารถตรวจสอบได้ | Watch: Popliteus + Hamstring ขวา")
+        print("   ⚠️  ไม่สามารถตรวจสอบได้")
 
     # --- Training Decision + Plan ---
     decision, reason = readiness_decision(bb, hrv_status, day_type, args.pain, taper_days)
@@ -454,10 +473,7 @@ def main():
     print(f"\n{SEP}")
     print("💊 NUTRITION")
     print(f"   Pre : {NUTRITION.get(nutrition_key, 'N/A')}")
-    if day_type in ("quality1", "quality2", "long") and decision == "GO":
-        print("   Post: iRun 1 เม็ด + BAAM ISO 1 scoop + น้ำ 200ml")
-    else:
-        print("   Post: BAAM ISO 1 scoop + น้ำ 200ml")
+    print("   Post: BAAM ISO 1 scoop + น้ำ 200ml")
 
     # --- Taper Monitor ---
     if taper_days is not None and taper_days <= 10:
