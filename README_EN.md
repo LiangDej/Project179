@@ -12,7 +12,7 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 
 | Agent | Live Garmin data? | How to connect |
 |---|---|---|
-| **Custom agent (recommended)** | ✅ Full | Clone repo, set `PYTHONPATH=skills/garmin_coach_mcp`, run tools via bash — the most self-contained path |
+| **Custom agent (recommended)** | ✅ Full | Clone repo, run tools via bash directly (no need to set `PYTHONPATH` yourself — tools resolve the path automatically) — the most self-contained path |
 | **Claude Code / Cowork** | ✅ Full | Open project folder — agent runs tools via bash just like a custom agent, no MCP server needed |
 | **Gemini via Google Colab** | ✅ Full | Colab has real internet + pip install — `!git clone`, set credentials, pull live Garmin data just like a custom agent |
 | **Cursor / GitHub Copilot** | ✅ Full | Open repo in IDE (runs on your real machine, normal internet access) — agent reads README as context |
@@ -51,7 +51,24 @@ echo 'GARMIN_PASSWORD=yourpassword'   >> ~/.config/garmin-coach/.env
 
 (the variable is named `GARMIN_USERNAME` even though the value is your email — see [`.env.example`](.env.example))
 
-### 3 · Paste this prompt to your AI agent (that's it)
+> **If your Garmin account has 2FA (email OTP) enabled:** the first login needs an interactive OTP entry — run this once yourself first (not through the AI agent, which runs non-interactively and can't type an OTP):
+> ```bash
+> cd GarminRawData/tools && ../../.venv/bin/python3 garmin_client.py --mfa <6-digit code from your email>
+> ```
+> After that the session token is cached, so you won't need to re-enter an OTP on subsequent runs (until the token expires).
+
+### 3 · Backfill your history (important — skippable, but not recommended)
+
+The default lookback is only 7 days, which is **not enough** for CTL/TSB (a 42-day EWMA) to be trustworthy — skip this and the first few daily briefs will warn "not enough history yet, CTL/TSB not reliable" (that's intentional — better a clear warning than a confidently wrong number):
+
+```bash
+cd GarminRawData/tools
+../../.venv/bin/python3 ../fetch_incremental.py --lookback-days 90
+```
+
+**~90 days** is enough to start trusting the numbers (accuracy keeps improving as you train, until it fully converges around ~42 real days). This takes a little while (there's a built-in 1-second rate limit between calls, so no risk of spamming your Garmin account) — no extra permission needed from Garmin beyond your normal login; it's just the same API called repeatedly over the date range.
+
+### 4 · Paste this prompt to your AI agent (that's it)
 
 ```
 I just cloned Project 179 — Garmin JD Running Coach.
