@@ -18,6 +18,8 @@ Usage:
     python3 fuji_race_pacer.py --elevation fuji.csv    # custom CSV profile
 """
 
+from __future__ import annotations
+
 import sys, os, csv, math, argparse
 from pathlib import Path
 from datetime import date

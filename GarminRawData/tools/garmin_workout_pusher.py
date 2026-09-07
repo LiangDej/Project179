@@ -11,6 +11,8 @@ Usage:
     python3 garmin_workout_pusher.py --week next --upload
 """
 
+from __future__ import annotations
+
 import sys, json, re, argparse, subprocess
 from pathlib import Path
 

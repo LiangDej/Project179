@@ -12,6 +12,8 @@ Setup:
     Add OPENWEATHER_API_KEY=xxx to ~/.config/garmin-coach/.env
     Get free key at https://openweathermap.org/api
 """
+
+from __future__ import annotations
 import sys, os, json, math, argparse
 from datetime import date, datetime, timezone
 

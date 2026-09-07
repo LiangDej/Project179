@@ -2,6 +2,8 @@
 db_helper.py — Firestore client wrapper with automatic local-file fallback for offline/development testing.
 Manages athlete profiles and credentials with strict separation of collections.
 """
+
+from __future__ import annotations
 import os
 import json
 import logging

@@ -22,6 +22,8 @@ Usage:
     python3 detect_session.py --verbose
 """
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path

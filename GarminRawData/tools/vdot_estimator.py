@@ -12,6 +12,8 @@ Usage:
     python3 vdot_estimator.py --json
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import math

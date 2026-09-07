@@ -7,6 +7,8 @@ Usage:
     python3 weekly_load_report.py --weeks 4
 """
 
+from __future__ import annotations
+
 import json
 import argparse
 import sys

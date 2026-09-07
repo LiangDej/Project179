@@ -19,6 +19,8 @@ Usage:
     python3 race_predictor.py --goal-fm 240 # Sub 4:00 FM (240 นาที)
 """
 
+from __future__ import annotations
+
 import sys
 import json
 import math

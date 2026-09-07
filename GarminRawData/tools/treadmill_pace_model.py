@@ -11,6 +11,8 @@ Zone labels reference LTHR 183 (Friel TM test 9 มิ.ย. 26): E<163, M 163–
 T 174–183, I 183–187. Anchors refined with that test's measured HR↔speed.
 """
 
+from __future__ import annotations
+
 # (avg_hr_bpm, pace_sec_per_km) — measured TM calibration points.
 # Easy + top-end anchors verified against the 9 มิ.ย. 26 LT2 test (clean 30-min).
 TM_HR_ANCHORS: list[tuple[int, int]] = [
