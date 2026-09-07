@@ -453,7 +453,7 @@ def main():
         print(f"   {_overall}")
         if _risks:
             for r in _risks[:3]:
-                print(f"   ⚠️  {r.get('site','')} — {r.get('reason','')}")
+                print(f"   ⚠️  {r.get('signal','')} — {r.get('detail','')}")
         else:
             print("   ไม่มีจุดที่ต้องเฝ้าระวังเป็นพิเศษตอนนี้")
     except Exception:
