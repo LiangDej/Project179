@@ -181,7 +181,7 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
     # in a fixed 28-day window or by activities missing HR.
     #   ATL (τ=7)  = acute load,  CTL (τ=42) = chronic load
     try:
-        from training_load import compute_current_pmc
+        from training_load import compute_current_pmc, pmc_confidence
         pmc = compute_current_pmc()
         if not pmc:
             return None
@@ -189,7 +189,20 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
     except Exception:
         return None
 
-    if ctl < 1:   # ไม่มี baseline พอ
+    # A fresh clone / new athlete with <14 days of history has an
+    # artificially low CTL (42-day EWMA hasn't converged yet), so ATL/CTL
+    # blows up to an absurd ratio (e.g. 22.9/4.7 = 4.9) that reads as a
+    # false CRITICAL — same cold-start problem pmc_confidence() already
+    # guards against for the daily_brief PMC section. Reuse it here instead
+    # of a second, looser "ctl < 1" heuristic that doesn't actually catch it.
+    try:
+        _, confidence, _ = pmc_confidence(activities)
+        if confidence in ("NONE", "LOW"):
+            return None
+    except Exception:
+        pass
+
+    if ctl < 1:   # ไม่มี baseline พอ (belt-and-suspenders for the confidence check above)
         return None
 
     acwr = atl / ctl
