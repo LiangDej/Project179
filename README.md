@@ -32,10 +32,12 @@ An AI running coach that connects to your Garmin data and coaches you using Jack
 ```bash
 git clone https://github.com/LiangDej/Project179.git
 cd Project179
-python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
-> **Windows:** venv/interpreter path ต่างจาก Mac/Linux — ใช้ `.venv\Scripts\python.exe` แทน `.venv/bin/python3.13` ทุกที่ที่เห็นในเอกสารนี้ (เช่น `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
+> ต้องการ **Python 3.10 ขึ้นไป** (แนะนำ 3.13) — ถ้าเครื่องมีหลายเวอร์ชัน ใช้ `python3.13 -m venv .venv` (หรือ 3.11/3.12) แทน `python3` เพื่อระบุเวอร์ชันชัดเจน
+>
+> **Windows:** venv/interpreter path ต่างจาก Mac/Linux — ใช้ `.venv\Scripts\python.exe` แทน `.venv/bin/python3` ทุกที่ที่เห็นในเอกสารนี้ (เช่น `.venv\Scripts\python.exe -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`)
 >
 > **⚠️ Garmin login อาจ fail บน Cloud VM/VPS** (AWS EC2, DigitalOcean, GitHub Actions runner, Replit, **รวมถึง Google Colab**) — Garmin Connect มักบล็อก IP ของ datacenter ผ่าน Cloudflare WAF (login จะ fail ทั้งที่ credential ถูก) นี่เป็นปัญหาที่พบบ่อยกับ unofficial Garmin API library ทั่วไป แต่**ยังไม่ได้ทดสอบยืนยัน 100% ว่าเกิดกับทุก provider** (รวม Colab ด้วย แม้ตารางด้านบนจะระบุว่า Colab ใช้ได้เต็มรูปแบบ — ถ้าเจอ login fail บน cloud provider ไหนก็ตาม ให้สงสัยเรื่องนี้ก่อน) ปลอดภัยสุดคือรันจาก residential IP ที่บ้าน (Mac/PC/WSL ในเครื่องจริง)
 
@@ -393,8 +395,8 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 
 ```bash
 # Run after any change to tools, config.py, athlete.json, or races.json
-.venv/bin/python3.13 GarminRawData/tests/test_suite.py
-# 30 checks: UNIT + CONSISTENCY + FUNCTIONAL — exit 0 = all green
+.venv/bin/python3 GarminRawData/tests/test_suite.py
+# UNIT + CONSISTENCY + FUNCTIONAL checks — exit 0 = all green
 ```
 
 **Protected files** (convention for AI coding assistants during a live coaching session — see [CLAUDE.md](CLAUDE.md) — human contributors should open a PR as normal):
@@ -414,6 +416,8 @@ Two `requirements.txt` files exist: the **root one is authoritative** (full set,
 - **ACWR via EWMA** — injury risk from ATL/CTL ratio
 - **ACSM Sawka 2007** — sweat-rate calibrated Na replacement
 - Paces and zones update automatically when athlete.json changes — no code edits needed
+
+รายละเอียดสูตรคำนวณทั้งหมด (baseline, stretch factor, phase ratios, taper curve) อยู่ที่ [`GarminRawData/TRAINING_PLAN_METHODOLOGY.md`](GarminRawData/TRAINING_PLAN_METHODOLOGY.md)
 
 ---
 
