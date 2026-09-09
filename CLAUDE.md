@@ -153,3 +153,13 @@ cd GarminRawData/tools
 ## Coach Skill
 
 Invoke via the `garmin-jd-coach` skill in Cowork. The skill uses Garmin MCP tools (server ฝั่ง Cowork plugin; local มีแค่ `skills/garmin_coach_mcp/config.py` + `db_helper.py`) to fetch live Garmin data, then runs analytics tools for context.
+
+## 📦 Version Control & Changelog — ทำทุกครั้งที่ push การแก้บั๊ก/ฟีเจอร์ไป public repo
+
+**ทุกครั้งที่แก้บั๊กหรือเพิ่มฟีเจอร์แล้วจะ push** (ไม่ใช่แค่แก้ athlete.json/races.json ของตัวเอง):
+1. เขียนสรุปการเปลี่ยนแปลงเพิ่มใน [`CHANGELOG.md`](CHANGELOG.md) หัวข้อ `[Unreleased]` หรือเวอร์ชันใหม่ (รูปแบบ [Keep a Changelog](https://keepachangelog.com/)) — แยกหมวด `Fixed` / `Added` / `Changed` / `Docs` / `Prevention`
+2. เมื่อสะสมงานพอเป็นก้อน (เช่น จบ 1 รอบ UAT หรือจบ session ที่แก้หลายจุด) → bump เลขเวอร์ชันใน `README.md`/`README_EN.md` badge + สรุปหัวข้อ CHANGELOG นั้นเป็นเวอร์ชันจริง (เช่น `[1.4] — วันที่`)
+3. สร้าง git tag คู่กับทุกเวอร์ชัน: `git tag v1.x && git push origin v1.x`
+4. commit message ต้องอธิบาย **สาเหตุ (why)** ของบั๊ก ไม่ใช่แค่บอกว่าเปลี่ยนอะไร — ใช้เพื่อ trace ย้อนหลังได้ว่าทำไมโค้ดถึงเป็นแบบนี้
+
+**อย่าข้ามขั้นตอนนี้แม้จะรีบ push** — ผู้ใช้ระบุไว้ชัดเจนว่าต้องการ version control และ changelog ที่ชัดเจนตลอดเวลา ไม่ใช่แค่ตอนที่นึกขึ้นได้
