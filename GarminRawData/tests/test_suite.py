@@ -407,6 +407,39 @@ def consistency_tests():
     check("STATIC: no stale zone literals (155/150/170–176/VDOT38) in any tool",
           not offenders, f"offenders={offenders}")
 
+    # Static scan for the "zombie fallback" bug class: an except-block (or
+    # unconditional default) that hardcodes an ARCHIVED race name/date/key
+    # instead of failing loudly or picking from the live active-race list.
+    # Round-5/6 UAT found this exact shape independently reintroduced across
+    # 7 different tools (daily_brief, nutrition_calculator, race_registry,
+    # taper_monitor, race_pace_planner, training_planner, training_load,
+    # session_prescriber, heat_acclimation, weather_adjuster, season_summary)
+    # each time race_registry.py failed/was unavailable — this check exists
+    # so a copy-pasted "except Exception: fall back to X" doesn't quietly
+    # reintroduce a hardcoded archived race the next time a tool is added
+    # or edited.
+    ZOMBIE_FALLBACK = [
+        r'"atm"\s*:\s*\{',                       # {"atm": {...}} dict literal
+        r'DEFAULT_RACE\s*=\s*"atm"',
+        r'_default_race\s*=\s*"atm"',
+        r'date\(2026,\s*11,\s*29\)',              # archived ATM race date
+        r'ATM Bangkok Marathon',
+        r'FUJI MARATHON RACE PLAN',
+        r'สำหรับ Fuji Marathon',
+        r'Bangkok→Fuji transition tracker',
+        r'Thai Race"',
+        r'"hm"\s*,\s*"fuji"\]\s*,\s*"hm"',        # old weather_adjuster.py shape
+        r'"atm"\s*,\s*\["hm"',                    # old season_summary.py shape
+    ]
+    zombie_offenders = {}
+    for f in scan_files:
+        txt = f.read_text(encoding="utf-8")
+        hits = [pat for pat in ZOMBIE_FALLBACK if re.search(pat, txt)]
+        if hits:
+            zombie_offenders[f.name] = hits
+    check("STATIC: no hardcoded-archived-race zombie fallback (atm/fuji/2026-11-29) in any tool",
+          not zombie_offenders, f"offenders={zombie_offenders}")
+
 
 # ===========================================================================
 # 7. FUNCTIONAL TESTS — Real Tools End-to-End Flow (CLI Regression Suite)

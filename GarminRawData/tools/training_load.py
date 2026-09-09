@@ -14,7 +14,7 @@ hrTSS formula (HR-based, ไม่ใช่ Power-based):
 Usage:
     python3 training_load.py               # แสดง 42 วันล่าสุด
     python3 training_load.py --days 90     # ดูย้อนหลัง 90 วัน
-    python3 training_load.py --race-plan   # แสดง CTL target สำหรับ Fuji
+    python3 training_load.py --race-plan   # แสดง CTL target สำหรับ A-race ปัจจุบัน
 """
 
 import sys
@@ -179,10 +179,18 @@ def print_pmc_table(pmc_series, lookback=14):
 
 
 def race_plan_targets():
-    """Display CTL targets needed for Fuji Sub 4:00."""
+    """Display CTL targets needed to hit the current A-race goal."""
+    try:
+        from race_registry import active_race
+        _race = active_race()
+        _title = f"{_race['name']} — CTL Targets"
+        if _race.get("goal_label"):
+            _title += f" ({_race['goal_label']})"
+    except Exception:
+        _title = "RACE PLAN — CTL Targets"
     print(f"""
 {'='*65}
-🗻 FUJI MARATHON RACE PLAN — CTL Targets (Sub 4:00)
+🏁 {_title}
 {'='*65}
   Phase              | Target CTL | Justification
   ─────────────────────────────────────────────────
@@ -204,7 +212,7 @@ def main():
     parser.add_argument("--days",      type=int, default=42,
                         help="จำนวนวันที่แสดงใน PMC table (default: 42)")
     parser.add_argument("--race-plan", action="store_true",
-                        help="แสดง CTL target สำหรับ Fuji Marathon")
+                        help="แสดง CTL target สำหรับ A-race ปัจจุบัน")
     args = parser.parse_args()
 
     activities = load_activities()
@@ -253,7 +261,7 @@ def main():
         races = [(r["name"], date.fromisoformat(r["date"]))
                  for _, r in list_races(active_only=True)]
     except Exception:
-        races = [("🏁 ATM Bangkok Marathon", date(2026, 11, 29))]
+        races = []
     print("\n  🏁 Race Countdown:")
     for name, rdate in races:
         delta = (rdate - today).days

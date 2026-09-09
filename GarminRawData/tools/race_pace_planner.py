@@ -62,9 +62,9 @@ def _build_races() -> dict:
             }
         return out
     except Exception:
-        return {"atm": {"name": "ATM Bangkok Marathon (42km)", "distance_km": 42.195,
-                        "date": date(2026, 11, 29), "aid_every_km": 5.0, "terrain": "flat",
-                        "default_goal_min": 240, "expected_temp_c": 27}}
+        print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
+        print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
+        sys.exit(1)
 
 RACES = _build_races()
 
@@ -324,7 +324,7 @@ def print_plan(p: dict):
 
 def main():
     parser = argparse.ArgumentParser(description="Race Pace Planner")
-    _default_race = "atm" if "atm" in RACES else list(RACES.keys())[0]
+    _default_race = list(RACES.keys())[0]  # RACES is already filtered to active races only
     parser.add_argument("--race",      choices=list(RACES.keys()), default=_default_race)
     parser.add_argument("--goal",      type=float, default=None,
                         help="Goal time in minutes (e.g. 110 for 1:50)")

@@ -36,8 +36,9 @@ try:
     }
     DEFAULT_RACE = active_race_key()
 except Exception:
-    RACE_TARGETS = {"atm": {"name": "ATM Bangkok Marathon (42km)", "dist_km": 42.2, "date": date(2026, 11, 29)}}
-    DEFAULT_RACE = "atm"
+    print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
+    print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Phase weekly km targets (progression) — DYNAMIC, derived per-athlete at runtime.
@@ -381,9 +382,9 @@ def get_week_info(monday: date = None) -> dict:
         km_target     : target weekly km (already deloaded if deload week)
         is_deload     : True if this is a 4th-week deload
         phase         : "base" | "quality" | "race_specific" | "taper"
-        days_to_race  : calendar days until Fuji
-        race_name     : "Fuji FM (42km)"
-        race_date     : "2026-12-13"
+        days_to_race  : calendar days until the active race (races.json)
+        race_name     : e.g. "Bangsaen42 Chonburi Marathon (42km)"
+        race_date     : e.g. "2026-11-15"
         easy_km       : recommended easy run distance (km) to hit weekly target
     """
     if monday is None:

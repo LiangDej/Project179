@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-heat_acclimation.py — TRIMP heat-adjusted training load + Bangkok→Fuji transition tracker
+heat_acclimation.py — TRIMP heat-adjusted training load + heat-acclimation transition tracker
 
 Science:
   - TRIMP (Bannister 1991): duration_min × HR_ratio × e^(b × HR_ratio)
@@ -19,7 +19,7 @@ Science:
 Usage:
     python3 heat_acclimation.py                  # current acclimation status
     python3 heat_acclimation.py --days 60        # 60-day window
-    python3 heat_acclimation.py --race-plan      # Bangkok→Fuji transition advice
+    python3 heat_acclimation.py --race-plan      # Bangkok heat-acclimation → current A-race advice
 """
 
 import sys, os, json, math, argparse
@@ -41,13 +41,14 @@ CACHE_DIR  = Path(__file__).resolve().parent.parent / "wellness"
 RHR = ATHLETE["rhr"]
 MHR = ATHLETE["mhr"]
 
-# Race date — SINGLE SOURCE: races.json (active race). ATM Nov 29 ในกรุงเทพ = ร้อน →
-# heat acclimation relevant ยิ่งกว่า Fuji (cold) เสียอีก. (ชื่อตัวแปรคงไว้เพื่อ backward-compat)
+# Race date — SINGLE SOURCE: races.json (active race).
 try:
     from race_registry import active_race
-    FUJI_RACE_DATE = date.fromisoformat(active_race()["date"])
+    RACE_DATE = date.fromisoformat(active_race()["date"])
 except Exception:
-    FUJI_RACE_DATE = date(2026, 11, 29)
+    print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
+    print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Bangkok monthly WBGT (6 AM training time — Stull 2011 approx)
@@ -221,7 +222,7 @@ def analyze(days: int = 60) -> dict:
             "is_current": w_offset == 0
         })
 
-    days_to_race  = (FUJI_RACE_DATE - today).days
+    days_to_race  = (RACE_DATE - today).days
 
     # Hot Weather Model: 100% of adaptation is retained on race day since we stay in the heat!
     score_race_day  = score_now
@@ -232,7 +233,7 @@ def analyze(days: int = 60) -> dict:
     phases = []
     if days_to_race > 28:
         phases.append({
-            "range": f"Now–{str(FUJI_RACE_DATE - timedelta(days=28))[:10]}",
+            "range": f"Now–{str(RACE_DATE - timedelta(days=28))[:10]}",
             "desc": "Train normally — maintain heat exposure passively/actively",
             "status": "normal"
         })
@@ -243,18 +244,18 @@ def analyze(days: int = 60) -> dict:
         })
     else:
         phases.append({
-            "range": f"Now–{str(FUJI_RACE_DATE - timedelta(days=7))[:10]}",
+            "range": f"Now–{str(RACE_DATE - timedelta(days=7))[:10]}",
             "desc": "Active heat maintenance — 1-2 saunas/week post-run",
             "status": "sauna_active"
         })
 
     phases.append({
-        "range": f"{str(FUJI_RACE_DATE - timedelta(days=7))[:10]}–{FUJI_RACE_DATE}",
+        "range": f"{str(RACE_DATE - timedelta(days=7))[:10]}–{RACE_DATE}",
         "desc": "Taper & Maintain — light heat run, stay highly hydrated",
         "status": "taper"
     })
     phases.append({
-        "range": str(FUJI_RACE_DATE),
+        "range": str(RACE_DATE),
         "desc": "Race day — Full heat pace protection active, lower cardiovascular strain",
         "status": "race"
     })
@@ -269,7 +270,7 @@ def analyze(days: int = 60) -> dict:
         "pv_benefit": round(pv_benefit, 1),
         "pv_perf": pv_perf,
         "days_to_race": days_to_race,
-        "last_bkk_day": str(FUJI_RACE_DATE),
+        "last_bkk_day": str(RACE_DATE),
         "days_to_last_bkk": days_to_race,
         "score_race_day": score_race_day,
         "pv_race": round(pv_race, 1),
@@ -297,7 +298,7 @@ def main():
 
     print("=" * 65)
     print(f"🌡️  HEAT ACCLIMATION TRACKER — {r['as_of']}")
-    print(f"   Bangkok training → Race Day ({FUJI_RACE_DATE})")
+    print(f"   Bangkok training → Race Day ({RACE_DATE})")
     print("=" * 65)
     print()
 
@@ -310,7 +311,7 @@ def main():
     print(f"💓 Cardiovascular Protection:")
     print(f"   Estimated PV expansion  : ~{r['pv_benefit']:.1f}%  (target ~8–10%)")
     print(f"   Heat pace protection    : ~+{r['pv_perf']:.1f}% in hot races (offsets part of 6–8% heat penalty)")
-    print(f"      ℹ️  benefit ชัดเจนเฉพาะแข่งร้อน — cool race (Fuji ธ.ค.) carry-over ยังถกเถียง (~0–3%)")
+    print(f"      ℹ️  benefit ชัดเจนเฉพาะแข่งร้อน — ถ้า A-race เป็นแข่งอากาศเย็น carry-over ยังถกเถียงอยู่ (~0–3%)")
     print()
 
     print(f"📅 Weekly Heat Load (last 8 weeks):")
@@ -326,7 +327,7 @@ def main():
 
     if args.race_plan or True:   # always show transition plan
         print(f"🏃‍♂️ Thailand Local Race Acclimation Plan:")
-        print(f"   Days to race          : {r['days_to_race']}d ({FUJI_RACE_DATE})")
+        print(f"   Days to race          : {r['days_to_race']}d ({RACE_DATE})")
         print(f"   Acclimation score now : {r['score']}")
         print(f"   Score on race day     : ~{r['score_race_day']:.0f}  (100% adaptation retained)")
         print()

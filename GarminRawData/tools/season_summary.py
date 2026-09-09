@@ -32,7 +32,9 @@ def main():
         from race_registry import race_choices, active_race_key
         _race_default, _race_choices = active_race_key(), race_choices()
     except Exception:
-        _race_default, _race_choices = "atm", ["hm", "atm", "fuji"]
+        print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
+        print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
+        sys.exit(1)
     parser.add_argument("--race", default=_race_default, choices=_race_choices)
     args = parser.parse_args()
 

@@ -390,6 +390,7 @@ def generate_week_plan(week: str, bb: int | None, hrv: str,
             "km_target":    km_target,
             "is_deload":    is_deload,
             "days_to_race": days_to_race,
+            "race_name":    week_info.get("race_name"),
             "long_run_km":  long_km_this_week,
         },
         "sessions": sessions,
@@ -407,11 +408,11 @@ def print_plan(plan: dict):
     s = plan.get("season", {})
     if s.get("week_num"):
         deload_tag = "  🔄 DELOAD" if s.get("is_deload") else ""
-        fuji_tag   = f"  |  🇹🇭 T-{s['days_to_race']}d Thai Race" if s.get("days_to_race") else ""
+        race_tag   = f"  |  🏁 T-{s['days_to_race']}d {s.get('race_name','A-race')}" if s.get("days_to_race") else ""
         print(f"   Season: Week {s['week_num']}/{s['total_weeks']} "
               f"| Target {s.get('km_target','?')}km "
               f"| Long {s.get('long_run_km','?')}km"
-              f"{deload_tag}{fuji_tag}")
+              f"{deload_tag}{race_tag}")
 
     if plan['taper']['active']:
         print(f"   ⚡ TAPER: T-{plan['taper']['days_to_race']} ก่อน {plan['taper']['race_name']}")
