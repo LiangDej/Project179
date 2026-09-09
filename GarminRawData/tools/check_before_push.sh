@@ -2,7 +2,7 @@
 # check_before_push.sh — run before every `git push` on this repo.
 #
 # Verifies:
-#   1. Test suite passes (30/30 checks — see GarminRawData/tests/test_suite.py)
+#   1. Test suite passes (see GarminRawData/tests/test_suite.py for current check count)
 #   2. No sensitive file is staged/tracked that should be gitignored
 #      (personal athlete data, credentials, VME lab secrets, wellness data)
 #
