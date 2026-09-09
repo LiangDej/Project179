@@ -468,6 +468,17 @@ def main():
     for line in plan:
         print(line)
 
+    if day_type not in ("strength", "rest"):
+        print(f"   💡 ลู่ไฟฟ้า: ปรับ Incline 1.0% เสมอ (จำลองแรงต้านอากาศกลางแจ้ง) — คุมด้วย HR ไม่ใช่ GPS pace")
+        try:
+            from bangkok_climate import morning_temp_c_for, ely_penalty_fraction
+            _temp = morning_temp_c_for(today)
+            _pen  = ely_penalty_fraction(_temp) * 100
+            if _pen > 0:
+                print(f"   💡 Outdoor: เช้านี้ราว {_temp:.0f}°C — Ely heat penalty +{_pen:.1f}% ปล่อยเพซ Easy/Long ช้าลงได้ คุมด้วย HR แทน pace")
+        except Exception:
+            pass
+
     # --- Nutrition ---
     nutrition_key = day_type if decision != "MODIFY" else "easy"
     print(f"\n{SEP}")
