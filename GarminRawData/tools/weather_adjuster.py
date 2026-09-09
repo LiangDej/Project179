@@ -446,7 +446,9 @@ def main():
         from race_registry import race_choices, active_race_key
         _wc, _wd = race_choices(), active_race_key()
     except Exception:
-        _wc, _wd = ["hm", "fuji"], "hm"
+        print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
+        print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
+        sys.exit(1)
     parser.add_argument("--race", default=_wd, choices=_wc)
     parser.add_argument("--date", default=None, help="YYYY-MM-DD")
     parser.add_argument("--time", default="03:30", help="HH:MM race start")

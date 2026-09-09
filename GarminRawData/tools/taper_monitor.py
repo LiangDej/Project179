@@ -49,7 +49,9 @@ try:
         for k, r in load_races().items() if r.get("active", True)
     }
 except Exception:
-    RACE_REGISTRY = {"atm": {"name": "ATM Bangkok Marathon (42km)", "date": date(2026, 11, 29)}}
+    print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
+    print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
+    sys.exit(1)
 
 # Taper volume targets (% of peak week to RETAIN — not cut).
 # "far" (>15 days out) is NOT actual taper — it's most of the training cycle
