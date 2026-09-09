@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.3-blue)
+![Version](https://img.shields.io/badge/version-1.4-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -448,6 +448,10 @@ Project นี้เป็น **เครื่องมือช่วยวา
 - ผู้ใช้เป็นผู้รับผิดชอบการตัดสินใจซ้อม/แข่งขันของตัวเองทั้งหมด
 
 ---
+
+## Changelog
+
+ดูรายการเปลี่ยนแปลงทุกเวอร์ชันที่ [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License
 
