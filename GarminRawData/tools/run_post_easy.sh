@@ -3,6 +3,7 @@
 # วิเคราะห์ session + auto-log ลง sessions_master.json
 # หมายเหตุ: skill_sync ไม่รันที่นี่ — easy runs ไม่เข้า sessions.json
 #           skill_sync รันหลัง Quality/Long Run เท่านั้น (มีข้อมูลใหม่จริง)
+# Treadmill: BELT_KMH=9.0 bash run_post_easy.sh  → per-km form uses belt pace
 set -euo pipefail
 
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -28,10 +29,10 @@ AUTO_ANSWERS="Y$(printf '\n%.0s' {1..50})"
 echo ""
 if [ -n "${1:-}" ]; then
   echo "📌 Activity ID: $1"
-  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --id "${1:-}"
+  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --id "${1:-}" ${BELT_KMH:+--belt-kmh "$BELT_KMH"}
 else
   echo "📌 Latest activity"
-  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest
+  printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest ${BELT_KMH:+--belt-kmh "$BELT_KMH"}
 fi
 
 # ── Auto-patch stamina_drain_pct → sessions_master.json ────────────────────

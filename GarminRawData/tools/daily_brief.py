@@ -104,60 +104,79 @@ RHR_WARN_DELTA = 5    # bpm above baseline → no quality today
 RHR_HIGH_DELTA = 8    # bpm above baseline → easy/short only (illness/overreach signal)
 
 
-def readiness_decision(bb, hrv_status, day_type, pain="none", taper_days=None,
-                       rhr=None, rhr_baseline=None):
-    # RHR vs personal baseline: an independent signal from BB (BB is itself
-    # derived from HRV/stress, so BB+HRV double-count one channel). Elevated
-    # morning RHR is the classic illness/overreaching/post-race flag
-    # (2026-11-17 review: RHR 55 vs 44 baseline was not used at all).
-    rhr_delta = (rhr - rhr_baseline) if (rhr and rhr_baseline) else None
+def readiness_assess(bb, hrv_status, day_type, pain="none", taper_days=None,
+                     rhr=None, rhr_baseline=None):
+    """Evaluate EVERY readiness rule and return the STRICTEST outcome.
+
+    v1.5 returned on the first matching rule, so a mild-pain "Easy 6–8 km"
+    masked stricter signals (RHR +11, HRV unbalanced) — 2026-11-17. Now all
+    rules vote; REST beats MODIFY beats CAUTION beats GO, and among MODIFYs
+    the smallest distance cap wins. Other triggered reasons are kept so the
+    brief shows all of them.
+
+    Returns dict: decision, reason, cap_km (None = no cap), others [str].
+    """
     if day_type == "rest":
-        return "REST", "🛌 วันพักตามตาราง ห้ามซ้อมเด็ดขาด"
+        return {"decision": "REST", "reason": "🛌 วันพักตามตาราง ห้ามซ้อมเด็ดขาด",
+                "cap_km": 0, "others": []}
     if day_type == "strength":
         if bb is not None and bb < 30:
-            return "MODIFY", "🟡 BB ต่ำมาก — ลด Weight Training เหลือ Mobility เท่านั้น"
-        return "GO", "✅ ทำ Strength ตามแผน"
+            return {"decision": "MODIFY", "reason": "🟡 BB ต่ำมาก — ลด Weight Training เหลือ Mobility เท่านั้น",
+                    "cap_km": None, "others": []}
+        return {"decision": "GO", "reason": "✅ ทำ Strength ตามแผน", "cap_km": None, "others": []}
+
+    is_q    = day_type in ("quality1", "quality2")
+    is_hard = is_q or day_type == "long"
+    hrv     = (hrv_status or "unknown").lower()
+    rhr_d   = (rhr - rhr_baseline) if (rhr and rhr_baseline) else None
+    votes   = []   # (decision, cap_km, msg)
 
     if bb is None:
-        return "CAUTION", "⚠️ ไม่พบข้อมูล Body Battery — ใช้ความรู้สึกตัวเองตัดสิน"
+        votes.append(("CAUTION", None, "⚠️ ไม่พบข้อมูล Body Battery — ใช้ความรู้สึกตัวเองตัดสิน"))
+    if taper_days is not None and taper_days <= 10 and is_q:
+        votes.append(("MODIFY", 8, "🟡 ใกล้วันแข่ง (≤10 วัน) — ยกเลิก Quality ปรับเป็น Easy อัตโนมัติ"))
+    if pain in ("mild", "moderate") and is_hard:
+        votes.append(("MODIFY", 8 if pain == "mild" else 5,
+                      f"🟡 มีอาการบาดเจ็บ ({pain}) — ลดระดับเป็น Easy Run เท่านั้น"))
+    if rhr_d is not None:
+        if rhr_d >= RHR_HIGH_DELTA:
+            votes.append(("MODIFY", 6, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d} bpm — "
+                                       "ยังไม่ฟื้น/อาจป่วย: Easy สั้น ≤40 นาที หรือพัก"))
+        elif rhr_d >= RHR_WARN_DELTA and is_hard:
+            votes.append(("MODIFY", 8, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d} bpm — ตัด Quality/Long → Easy"))
+    if hrv == "unbalanced":
+        if bb is not None and bb < 30:
+            votes.append(("REST", 0, "🔴 HRV Unbalanced + BB ต่ำมาก — ร่างกายล้าสะสม พักผ่อน 100%"))
+        else:
+            votes.append(("MODIFY", 8 if is_hard else 6,
+                          "🟡 HRV Unbalanced — ระบบประสาทไม่พร้อม ปรับลดความหนักลง"))
+    if bb is not None:
+        if bb < 20:
+            votes.append(("REST", 0, "🔴 BB ต่ำมาก — พักผ่อน อย่าฝืน"))
+        elif bb < 40:
+            votes.append(("MODIFY", 6, "🟡 BB ต่ำ — Easy 6km HR < 140 เท่านั้น"))
+        elif (bb < 60 or hrv != "balanced") and is_q:
+            votes.append(("MODIFY", 8, "🟡 BB ปานกลาง/HRV ไม่ balanced — ลด Quality → Easy Run แทน"))
 
-    hrv_unbalanced = hrv_status.lower() == "unbalanced"
-
-    if taper_days is not None and taper_days <= 10 and day_type in ("quality1", "quality2"):
-        return "MODIFY", "🟡 ใกล้วันแข่ง (≤10 วัน) — ยกเลิก Quality Session ปรับเป็น Easy อัตโนมัติ"
-
-    if pain in ("mild", "moderate") and day_type in ("quality1", "quality2", "long"):
-        return "MODIFY", f"🟡 มีอาการบาดเจ็บ ({pain}) — ลดระดับเป็น Easy Run เท่านั้น"
-
-    if rhr_delta is not None and day_type not in ("rest", "strength"):
-        if rhr_delta >= RHR_HIGH_DELTA:
-            return "MODIFY", (f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_delta} bpm — "
-                              "ยังไม่ฟื้น/อาจป่วย: Easy สั้น ≤40 นาที หรือพัก")
-        if rhr_delta >= RHR_WARN_DELTA and day_type in ("quality1", "quality2", "long"):
-            return "MODIFY", (f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_delta} bpm — "
-                              "ตัด Quality/Long → Easy")
-
-    if hrv_unbalanced:
-        if bb < 30:
-            return "REST", "🔴 HRV Unbalanced + BB ต่ำมาก — ร่างกายล้าสะสม พักผ่อน 100%"
-        return "MODIFY", "🟡 HRV Unbalanced — ระบบประสาทไม่พร้อม ปรับลดความหนักลง"
-
-    hrv_ok = hrv_status.lower() == "balanced"
-    if bb >= 60 and hrv_ok:
-        if day_type in ("quality1", "quality2"):
-            return "GO", "✅ พร้อมเต็มที่ — วิ่ง Quality ตามแผน"
-        return "GO", "✅ พร้อม — วิ่งตามแผน"
-    elif bb >= 40:
-        if day_type in ("quality1", "quality2"):
-            return "MODIFY", "🟡 BB ปานกลาง — ลด Quality → Easy Run แทน"
-        return "GO", "✅ วิ่ง Easy ตามปกติได้"
-    elif bb >= 20:
-        return "MODIFY", "🟡 BB ต่ำ — Easy 6km HR < 140 เท่านั้น"
-    else:
-        return "REST", "🔴 BB ต่ำมาก — พักผ่อน อย่าฝืน"
+    rank = {"REST": 3, "MODIFY": 2, "CAUTION": 1}
+    if votes:
+        votes.sort(key=lambda v: (-rank[v[0]], v[1] if v[1] is not None else 99))
+        d, cap, msg = votes[0]
+        return {"decision": d, "reason": msg, "cap_km": cap,
+                "others": [v[2] for v in votes[1:]]}
+    if is_q:
+        return {"decision": "GO", "reason": "✅ พร้อมเต็มที่ — วิ่ง Quality ตามแผน", "cap_km": None, "others": []}
+    return {"decision": "GO", "reason": "✅ พร้อม — วิ่งตามแผน", "cap_km": None, "others": []}
 
 
-def build_action_plan(day_info, decision, day_type, taper_race, taper_days):
+def readiness_decision(bb, hrv_status, day_type, pain="none", taper_days=None,
+                       rhr=None, rhr_baseline=None):
+    """Back-compat wrapper → (decision, reason). See readiness_assess()."""
+    a = readiness_assess(bb, hrv_status, day_type, pain, taper_days, rhr, rhr_baseline)
+    return a["decision"], a["reason"]
+
+
+def build_action_plan(day_info, decision, day_type, taper_race, taper_days, cap_km=None):
     plan = []
 
     if decision == "REST":
@@ -176,11 +195,17 @@ def build_action_plan(day_info, decision, day_type, taper_race, taper_days):
     if phase_info and day_type not in ("rest", "strength"):
         plan.append(f"   🗓️  Phase: {phase_info['name']} — {prescription['focus']}")
 
-    if decision == "MODIFY" and day_type in ("quality1", "quality2"):
+    if decision == "MODIFY" and day_type in ("quality1", "quality2", "long", "easy", "easy+strides"):
+        # Any downgraded running day → Easy, distance capped by the strictest
+        # readiness rule (was: long days ignored MODIFY and still printed a
+        # 12–16 km long run; caps like "≤40 min" were never applied).
         pace_lo = format_pace(VDOT_PACES["E"][0])
         pace_hi = format_pace(VDOT_PACES["E"][1])
-        plan.append("   📋 Easy Run (ลดระดับจาก Quality เพื่อลดความเสี่ยง)")
-        plan.append(f"   ⏱️  ระยะ: 6.0–8.0 km | Pace: {pace_lo}–{pace_hi} | HR: < {HR_ZONE_BOUNDS['Z1_E'][1]} bpm")
+        hi = min(8, cap_km) if cap_km else 8
+        lo = max(3, hi - 2)
+        src = {"quality1": "Quality", "quality2": "Quality", "long": "Long Run"}.get(day_type, "Easy")
+        plan.append(f"   📋 Easy Run (ลดระดับจาก {src} ตาม readiness)")
+        plan.append(f"   ⏱️  ระยะ: {lo}.0–{hi}.0 km (หรือพัก) | Pace: {pace_lo}–{pace_hi} | HR: < {HR_ZONE_BOUNDS['Z1_E'][1]} bpm")
     elif day_type in ("quality1", "quality2"):
         q_override = day_info.get("quality_override")
         if q_override:
@@ -480,12 +505,15 @@ def main():
         print("   ⚠️  ไม่สามารถตรวจสอบได้")
 
     # --- Training Decision + Plan ---
-    decision, reason = readiness_decision(bb, hrv_status, day_type, args.pain, taper_days,
-                                          rhr=rhr, rhr_baseline=ATHLETE.get("rhr"))
+    _ra = readiness_assess(bb, hrv_status, day_type, args.pain, taper_days,
+                           rhr=rhr, rhr_baseline=ATHLETE.get("rhr"))
+    decision, reason = _ra["decision"], _ra["reason"]
     print(f"\n{SEP}")
     print(f"🎯 TODAY'S PLAN{taper_tag}")
     print(f"   {reason}")
-    plan = build_action_plan(day_info, decision, day_type, taper_race, taper_days)
+    for _o in _ra["others"]:
+        print(f"   ↳ ร่วมด้วย: {_o}")
+    plan = build_action_plan(day_info, decision, day_type, taper_race, taper_days, cap_km=_ra["cap_km"])
     for line in plan:
         print(line)
 

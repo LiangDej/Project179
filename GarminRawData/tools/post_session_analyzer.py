@@ -1139,7 +1139,31 @@ def main():
     parser.add_argument("--rep-speeds", type=str, default=None,
                         help="TM only: actual rep speeds in km/h, comma-separated "
                              "(e.g. '11.5,11.5,11.5'). Overrides unreliable Garmin TM pace.")
+    parser.add_argument("--belt-kmh", type=float, default=None,
+                        help="TM steady run: belt speed in km/h (e.g. 9.0). Per-km form table "
+                             "uses belt pace instead of the unreliable watch TM pace.")
+    parser.add_argument("--json", action="store_true",
+                        help="Print a machine-readable JSON summary to stdout "
+                             "(human report goes to stderr) — for AI agents to narrate, not compute.")
     args = parser.parse_args()
+    if args.json:
+        import contextlib
+        _real_stdout = sys.stdout
+        with contextlib.redirect_stdout(sys.stderr):
+            result = _run(args)
+        _real_stdout.write(json.dumps(result, ensure_ascii=False, default=str, indent=2) + "\n")
+        return
+    _run(args)
+
+
+def _safe_flags(r):
+    try:
+        return flag_issues(r)
+    except Exception:
+        return []
+
+
+def _run(args):
 
     rep_speeds = None
     if args.rep_speeds:
@@ -1178,6 +1202,16 @@ def main():
     r["_rep_speeds_override"] = rep_speeds
     print_report(act_id, report_date, r)
 
+    # Per-km form + wrist-HR cadence-lock check (fixed, tested code — replaces
+    # the ad-hoc scripts the coach agent used to write for every analysis)
+    form = None
+    try:
+        from form_analysis import analyze_form, print_form
+        form = analyze_form(data, belt_kmh=args.belt_kmh)
+        print_form(form)
+    except Exception as e:
+        print(f"\n⚠️  Form analysis unavailable ({e})")
+
     # Long Run (>=14km) → show Energy Efficiency Score inline so it never
     # depends on remembering to run energy_efficiency_scorer.py separately.
     s = (data.get("_activitySummary") or {}).get("summaryDTO", {})
@@ -1214,6 +1248,23 @@ def main():
             auto_log(act_id, data, r, report_date)
         except Exception:
             pass
+
+    _keys = ("session_type", "avg_hr", "max_hr", "pace", "decoupling", "cadence", "gct",
+             "vr", "stride", "zone_pct", "grade", "stam_start", "stam_end", "bb_start", "bb_end")
+    _summary = {k: r.get(k) for k in _keys if k in r}
+    _p = _summary.pop("pace", None)
+    if isinstance(_p, (int, float)) and _p > 0:
+        _summary["pace_watch"] = f"{int(_p)}:{int(round((_p % 1) * 60)) % 60:02d}/km"
+        if r.get("is_treadmill"):
+            _summary["pace_watch_note"] = "treadmill: watch pace unreliable — use belt speed"
+    if args.belt_kmh:
+        _summary["belt_kmh"] = args.belt_kmh
+        _summary["pace_belt"] = f"{int(60 / args.belt_kmh)}:{int(round((60 / args.belt_kmh % 1) * 60)) % 60:02d}/km"
+    return {"activity_id": act_id, "date": report_date,
+            "is_treadmill": r.get("is_treadmill"),
+            "summary": _summary,
+            "flags": _safe_flags(r),
+            "form": form}
 
 
 if __name__ == "__main__":

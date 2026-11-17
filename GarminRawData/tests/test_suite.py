@@ -563,6 +563,42 @@ def plausibility_tests():
     check("plausibility: readiness downgrades long run when RHR +5 over baseline", d2 == "MODIFY")
     check("plausibility: readiness GO at baseline RHR + good BB/HRV", d3 == "GO")
     check("plausibility: easy day still GO at RHR +5", d4 == "GO")
+    # Strictest-rule-wins (2026-11-17: mild pain masked RHR +11 / HRV unbalanced)
+    ra = db.readiness_assess(48, "unbalanced", "quality1", pain="mild", rhr=rb + 11, rhr_baseline=rb)
+    check("readiness: strictest rule wins (pain + RHR+11 + HRV → cap ≤6 km)",
+          ra["decision"] == "MODIFY" and ra["cap_km"] == 6, str(ra))
+    check("readiness: other triggered reasons are kept", len(ra["others"]) >= 2, str(ra["others"]))
+    ra2 = db.readiness_assess(25, "unbalanced", "easy", pain="mild", rhr=rb + 11, rhr_baseline=rb)
+    check("readiness: REST beats every MODIFY (HRV unbalanced + BB<30)", ra2["decision"] == "REST")
+    plan = db.build_action_plan({"label": "Long", "note": ""}, "MODIFY", "long", None, None, cap_km=6)
+    check("readiness: MODIFY on a long-run day no longer prints a long run",
+          not any("Long Run\n" in l or l.strip() == "📋 Long Run" for l in plan)
+          and any("ลดระดับจาก Long Run" in l for l in plan), " | ".join(plan))
+    check("readiness: cap_km applied to the plan distance",
+          any("–6.0 km" in l for l in plan), " | ".join(plan))
+    # form_analysis (post-run per-km form + cadence lock) — synthetic stream
+    import form_analysis as fa
+    def _mk(n_km, hr_fn, cad_fn, gct_fn):
+        desc = [{"key": k, "metricsIndex": i} for i, k in enumerate(
+            ["directHeartRate", "sumDistance", "directSpeed", "directRunCadence",
+             "directGroundContactTime", "directVerticalRatio", "directStrideLength", "sumElapsedDuration"])]
+        rows, step = [], 10  # one sample per 10 m at 3 m/s
+        for i in range(n_km * 100):
+            d = i * step
+            rows.append({"metrics": [hr_fn(i), d, 3.0, cad_fn(i) / 2, gct_fn(d), 8.5, 100, d / 3.0]})
+        return {"metricDescriptors": desc, "activityDetailMetrics": rows}
+    held = fa.analyze_form(_mk(6, lambda i: 150, lambda i: 170, lambda d: 250))
+    check("form: per-km rows built from watch distance", len(held["per_km"]) == 6, str(len(held["per_km"])))
+    check("form: steady run → 'form held'", held["drift"]["verdict"] == "form held", str(held["drift"]))
+    tired = fa.analyze_form(_mk(6, lambda i: 150, lambda i: 170, lambda d: 250 + d / 200))
+    check("form: GCT rising ≥10 ms → 'form fatigue'", tired["drift"]["verdict"] == "form fatigue", str(tired["drift"]))
+    locked = fa.analyze_form(_mk(3, lambda i: 170, lambda i: 170, lambda d: 250))
+    check("form: HR == cadence → cadence lock 'suspected'", locked["cadence_lock"]["verdict"] == "suspected")
+    free = fa.analyze_form(_mk(3, lambda i: 145, lambda i: 172, lambda d: 250))
+    check("form: HR far from cadence → lock 'not detected'", free["cadence_lock"]["verdict"] == "not detected")
+    belt = fa.analyze_form(_mk(2, lambda i: 140, lambda i: 160, lambda d: 280), belt_kmh=9.0)
+    check("form: --belt-kmh overrides watch pace (9.0 km/h → 6:40)",
+          all(r["pace"] == "6:40" and r["pace_source"] == "belt" for r in belt["per_km"]))
     check("plausibility: coaching_constraints is a list",
           isinstance(A.get("coaching_constraints", []), list))
 

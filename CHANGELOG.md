@@ -2,6 +2,29 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [1.6] — 2026-11-17
+
+Theme: **reduce coach-agent hallucination by moving judgment and arithmetic into tested code** — every recurring agent mistake this cycle traced back to the agent computing or remembering something a tool should own.
+
+### Fixed
+- **Readiness returned on the first matching rule** — mild knee pain produced "Easy 6–8 km" while RHR was +11 over baseline and HRV was unbalanced (both stricter). `daily_brief.readiness_assess()` now lets every rule vote: REST > MODIFY (smallest distance cap) > CAUTION > GO, and prints the other triggered reasons as `↳ ร่วมด้วย`. `readiness_decision()` kept as a back-compat wrapper.
+- **A downgraded long-run day still printed a full 12–16 km long run** — `build_action_plan` only honoured MODIFY on quality days and never applied caps. Any MODIFY running day → Easy, capped by the strictest rule.
+- **23 rows of personal training data were committed in `skills/garmin-coach-analyzer.md`** (skill_sync appended them after the v1.x sanitize). `skill_sync.py` now writes to gitignored `GarminRawData/session_table.md`; rows removed from the public skill file.
+
+### Added
+- **`form_analysis.py`** (new tool, pure functions): per-km pace/HR/cadence/GCT/VR/stride, first-vs-last-third form drift with fatigue flags, and a wrist-HR **cadence-lock** check (share of |HR−cadence| ≤2 samples + Pearson r). Previously the agent wrote a throw-away script for this on every "post run analyze".
+- `post_session_analyzer.py --belt-kmh X` (treadmill: belt pace replaces unreliable watch pace in the form table) and `--json` (machine-readable summary to stdout, human report to stderr; pace emitted as `m:ss` strings with source labels, never raw decimals).
+- `run_post_easy.sh`: `BELT_KMH=9.0 bash run_post_easy.sh` passthrough.
+- `athlete.json → gear` (roles, first-use date, mileage estimate, explicit `unconfirmed` list) — not committed (personal).
+
+### Changed
+- **`skills/garmin-coach-analyzer.md` v7.0: 45 KB → ~11 KB.** Rules only. Removed every personal or mutable fact (product names, injury-specific advice, paces, readiness table) that had drifted from `athlete.json`. Added a "code decides, agent narrates" golden rule: numbers only from tools, no ad-hoc analysis scripts, unknown → ask.
+
+### Prevention
+- 11 new checks (131 total): strictest-rule-wins, REST beats MODIFY, long-day downgrade, cap applied, and form_analysis behaviour on synthetic streams (steady vs fatiguing GCT, locked vs free HR, belt override).
+
+---
+
 ## [1.5] — 2026-11-17
 
 Full-project review (sports-science / data / agent) → fixes below. Root theme: the suite was 107/107 green while a core output was physiologically absurd — tests checked formula *consistency*, not output *plausibility*.

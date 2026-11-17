@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.5-blue)
+![Version](https://img.shields.io/badge/version-1.6-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -382,7 +382,7 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 
 | พูดว่า | ได้ |
 |---|---|
-| "อัป coach skill ให้ตรงกับ session log ล่าสุด" | update garmin-coach-analyzer.md ให้ reflect quality progress ล่าสุด |
+| "อัป coach skill ให้ตรงกับ session log ล่าสุด" | skill_sync.py → อัปตาราง quality ส่วนตัวใน `GarminRawData/session_table.md` (gitignored) |
 
 ---
 

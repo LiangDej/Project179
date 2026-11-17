@@ -77,3 +77,6 @@ skills/investment-coach.md
 # garmin_coach_mcp has its own local git repo — track only the two needed files
 # (config.py and db_helper.py are added explicitly above)
 skills/garmin_coach_mcp/__pycache__/
+
+# Personal quality-session table written by skill_sync.py
+GarminRawData/session_table.md

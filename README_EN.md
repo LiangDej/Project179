@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.5-blue)
+![Version](https://img.shields.io/badge/version-1.6-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -383,7 +383,7 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 | Say | You get |
 |---|---|
-| "Update the coach skill to reflect my latest sessions" | Updates garmin-coach-analyzer.md to reflect latest quality progress |
+| "Update the coach skill to reflect my latest sessions" | skill_sync.py → updates your personal quality table in `GarminRawData/session_table.md` (gitignored) |
 
 ---
 
