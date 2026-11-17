@@ -2,7 +2,8 @@ name: Project 179 CI
 
 # Gate 1 (Version Control) + Gate 2 (Static/Unit/Consistency/Functional)
 # Runs automatically on every push/PR to main.
-# test_suite.py = 30 checks (UNIT + CONSISTENCY + FUNCTIONAL)
+# test_suite.py = UNIT + CONSISTENCY + FUNCTIONAL checks (count grows over time —
+# see GarminRawData/tests/test_suite.py for the current total, not hardcoded here)
 # Exit 0 = green; any fail → PR is blocked.
 
 on:
@@ -13,7 +14,7 @@ on:
 
 jobs:
   test-suite:
-    name: "Test Suite (30 checks)"
+    name: "Test Suite"
     runs-on: ubuntu-latest
 
     steps:
@@ -47,6 +48,13 @@ jobs:
           PYTHONPATH: "skills/garmin_coach_mcp:GarminRawData/tools"
         run: |
           .venv/bin/python3.13 GarminRawData/tests/test_suite.py
+
+      # Unit tests (tools/tests/test_tools.py) — were never run in CI, so 7 of
+      # them silently rotted against old VDOT/zone/phase values (found 2026-11-17).
+      - name: Run unit tests
+        working-directory: GarminRawData/tools
+        run: |
+          ../../.venv/bin/python3.13 -m unittest tests.test_tools
 
       # Optional: upload test output on failure for debugging
       - name: Upload failure log

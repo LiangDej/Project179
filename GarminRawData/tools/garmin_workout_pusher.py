@@ -9,6 +9,7 @@ Usage:
     python3 garmin_workout_pusher.py --upload     # preview + upload
     python3 garmin_workout_pusher.py --week next  # สัปดาห์หน้า
     python3 garmin_workout_pusher.py --week next --upload
+    python3 garmin_workout_pusher.py --plan-file my_week.json [--upload]   # hand-adjusted week
 """
 
 from __future__ import annotations
@@ -444,6 +445,9 @@ def main():
     parser.add_argument("--yes",    action="store_true", help="Skip confirmation prompt")
     parser.add_argument("--no-warmup", action="store_true",
                          help="Omit the watch-guided warmup jog + stride wake-up on Quality (T/I) workouts — athlete warms up on their own before starting the structured set")
+    parser.add_argument("--plan-file", metavar="PATH",
+                         help="Read the weekly plan from a JSON file (same shape as `session_prescriber.py --json`) "
+                              "instead of generating it — for hand-adjusted weeks (travel, mini-taper). --week is ignored.")
     args = parser.parse_args()
 
     # ── TT mode ──
@@ -470,16 +474,27 @@ def main():
         return
 
     # ── Weekly plan mode ──
-    result = subprocess.run(
-        [sys.executable, str(TOOLS_DIR / "session_prescriber.py"),
-         "--week", args.week, "--json"],
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        print(f"❌ session_prescriber error: {result.stderr}")
-        sys.exit(1)
+    if args.plan_file:
+        try:
+            plan = json.loads(Path(args.plan_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"❌ --plan-file error: {e}")
+            sys.exit(1)
+        missing = [k for k in ("generated_for", "phase", "focus", "sessions") if k not in plan]
+        if missing:
+            print(f"❌ --plan-file missing keys: {', '.join(missing)}")
+            sys.exit(1)
+    else:
+        result = subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "session_prescriber.py"),
+             "--week", args.week, "--json"],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print(f"❌ session_prescriber error: {result.stderr}")
+            sys.exit(1)
 
-    plan = json.loads(result.stdout)
+        plan = json.loads(result.stdout)
 
     print(f"\n{'='*60}")
     print(f"📅 GARMIN WORKOUT PLAN — {plan['generated_for']}")

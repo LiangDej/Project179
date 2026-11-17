@@ -30,6 +30,11 @@
   "lthr_confidence": "MODERATE",
   "tt_scheduled": null,
 
+  "fm_endurance_factor": 1.0,
+  "_fm_endurance_factor_note": "actual FM time / VDOT-predicted FM time. Leave 1.0 until you have a marathon result; after each FM set it to actual/predicted (typ. 1.05-1.20 if long runs < 30 km).",
+  "coaching_constraints": [],
+  "_coaching_constraints_help": "Standing preferences the AI coach must not violate (e.g. \"no run/walk suggestions\"). Printed at the end of every daily brief.",
+
   "_zones_note": "HR zones are derived automatically by config.py from lthr/rhr/mhr above. Do not edit hr_zone_hrr_pct unless you know what you are doing.",
   "hr_zone_hrr_pct": { "E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95 },
 

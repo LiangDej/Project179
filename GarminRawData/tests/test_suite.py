@@ -510,6 +510,62 @@ def _require_athlete_data():
         print("=" * 60)
         sys.exit(1)
 
+# ===========================================================================
+# 8. PLAUSIBILITY — outputs must make physiological sense, not just be
+#    formula-consistent (added 2026-11-17 after a 107/107-green suite still
+#    let race_predictor report VDOT 33.3 for a VDOT-40 athlete).
+# ===========================================================================
+def plausibility_tests():
+    import io, contextlib
+    from config import ATHLETE as A
+    import training_load as tl
+    import race_predictor as rp
+    import daily_brief as db
+
+    check("plausibility: hrTSS IF=1.0 anchored at LTHR (not T-zone floor)", tl.T_HR == A["lthr"])
+    check("plausibility: 1h at LTHR == 100 hrTSS",
+          abs(tl.calc_hr_tss({"averageHR": A["lthr"], "duration": 3600}) - 100) < 0.5)
+
+    base = A["vdot"]
+    t_lo, t_hi = rp.T_HR_LO, rp.T_HR_HI
+    sessions = [
+        {"date": "2026-09-10", "session_type": "Interval (I)", "avg_hr": 159, "pace": "6:21/km"},  # whole-session pace artefact
+        {"date": "2026-09-08", "session_type": "Threshold (T)", "avg_hr": t_lo + 2, "pace": "5:05/km"},
+        {"date": "2026-09-01", "session_type": "Threshold (T)", "avg_hr": t_lo + 3, "pace": "5:05/km"},
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        est, used = rp.estimate_current_vdot(sessions)
+    check("plausibility: artefact session cannot drag estimate outside ±band",
+          est is not None and abs(est - base) <= rp.PLAUSIBLE_BAND, f"est={est} base={base}")
+    check("plausibility: artefact I-session (6:21/km whole-session pace) rejected",
+          all(u[0] != "2026-09-10" for u in used))
+    hot = rp.estimate_vdot_from_session(
+        {"date": "2026-09-01", "session_type": "Threshold (T)", "avg_hr": t_lo, "pace": "5:05/km"}, quality_hr_avg=t_lo - 0)
+    check("plausibility: HR-only T estimate capped at ±3 VDOT",
+          hot is None or abs(hot - base) <= 3.0, f"{hot}")
+    slow_hot = rp.estimate_vdot_from_session(
+        {"date": "2026-09-01", "session_type": "Threshold (T)", "avg_hr": t_hi, "pace": "6:00/km"}, quality_hr_avg=t_hi)
+    check("plausibility: high HR at slow pace can signal DOWN (estimator not up-only)",
+          slow_hot is not None and slow_hot < base, f"{slow_hot}")
+
+    today = date.today().isoformat()
+    check("plausibility: predictor FM goal is an upcoming race (or none)",
+          rp._FM_RACE_DATE == "—" or rp._FM_RACE_DATE >= today[:7], rp._FM_RACE_DATE)
+    fef = A.get("fm_endurance_factor", 1.0)
+    check("plausibility: fm_endurance_factor within 1.0–1.4", 1.0 <= fef <= 1.4, str(fef))
+
+    rb = A["rhr"]
+    d1, _ = db.readiness_decision(80, "balanced", "quality1", rhr=rb + 9, rhr_baseline=rb)
+    d2, _ = db.readiness_decision(80, "balanced", "long", rhr=rb + 5, rhr_baseline=rb)
+    d3, _ = db.readiness_decision(80, "balanced", "quality1", rhr=rb, rhr_baseline=rb)
+    d4, _ = db.readiness_decision(80, "balanced", "easy", rhr=rb + 5, rhr_baseline=rb)
+    check("plausibility: readiness downgrades quality when RHR +9 over baseline", d1 == "MODIFY")
+    check("plausibility: readiness downgrades long run when RHR +5 over baseline", d2 == "MODIFY")
+    check("plausibility: readiness GO at baseline RHR + good BB/HRV", d3 == "GO")
+    check("plausibility: easy day still GO at RHR +5", d4 == "GO")
+    check("plausibility: coaching_constraints is a list",
+          isinstance(A.get("coaching_constraints", []), list))
+
 
 def main():
     _require_athlete_data()
@@ -537,6 +593,9 @@ def main():
 
     # 7. Functional CLI Regression Flows
     functional_tests()
+
+    # 8. Plausibility (outputs make physiological sense)
+    plausibility_tests()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
     total  = len(_RESULTS)

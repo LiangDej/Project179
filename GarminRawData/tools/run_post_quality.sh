@@ -57,6 +57,12 @@ else
   "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py
 fi
 
+# ── Step 3.5: Body Battery run-window fix (session_logger stores day peak) ──
+echo ""
+echo "▶ Step 3.5 — Body Battery (run-window fix)"
+echo "────────────────────────────────────"
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fix_session_bb.py"
+
 # ── Step 4: Sync skill file ─────────────────────────────────────────────────
 echo ""
 echo "▶ Step 4/4 — Skill Sync"

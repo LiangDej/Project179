@@ -43,6 +43,11 @@ else
   "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py
 fi
 
+# ── Fix bb_start/bb_end → run window only (session_logger stores day peak) ──
+echo ""
+echo "▶ Body Battery (run-window fix)"
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fix_session_bb.py"
+
 # ── Recalculate Energy Efficiency Score ────────────────────────────────────
 echo ""
 echo "▶ Energy Efficiency Score"

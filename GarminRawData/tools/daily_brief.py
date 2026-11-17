@@ -100,7 +100,17 @@ def get_taper_phase():
     return None, None
 
 
-def readiness_decision(bb, hrv_status, day_type, pain="none", taper_days=None):
+RHR_WARN_DELTA = 5    # bpm above baseline → no quality today
+RHR_HIGH_DELTA = 8    # bpm above baseline → easy/short only (illness/overreach signal)
+
+
+def readiness_decision(bb, hrv_status, day_type, pain="none", taper_days=None,
+                       rhr=None, rhr_baseline=None):
+    # RHR vs personal baseline: an independent signal from BB (BB is itself
+    # derived from HRV/stress, so BB+HRV double-count one channel). Elevated
+    # morning RHR is the classic illness/overreaching/post-race flag
+    # (2026-11-17 review: RHR 55 vs 44 baseline was not used at all).
+    rhr_delta = (rhr - rhr_baseline) if (rhr and rhr_baseline) else None
     if day_type == "rest":
         return "REST", "🛌 วันพักตามตาราง ห้ามซ้อมเด็ดขาด"
     if day_type == "strength":
@@ -118,6 +128,14 @@ def readiness_decision(bb, hrv_status, day_type, pain="none", taper_days=None):
 
     if pain in ("mild", "moderate") and day_type in ("quality1", "quality2", "long"):
         return "MODIFY", f"🟡 มีอาการบาดเจ็บ ({pain}) — ลดระดับเป็น Easy Run เท่านั้น"
+
+    if rhr_delta is not None and day_type not in ("rest", "strength"):
+        if rhr_delta >= RHR_HIGH_DELTA:
+            return "MODIFY", (f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_delta} bpm — "
+                              "ยังไม่ฟื้น/อาจป่วย: Easy สั้น ≤40 นาที หรือพัก")
+        if rhr_delta >= RHR_WARN_DELTA and day_type in ("quality1", "quality2", "long"):
+            return "MODIFY", (f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_delta} bpm — "
+                              "ตัด Quality/Long → Easy")
 
     if hrv_unbalanced:
         if bb < 30:
@@ -314,7 +332,9 @@ def main():
     bb_now_tag = f"  (ตอนนี้ {bb_now})" if bb_now is not None and bb_now != bb else ""
     print(f"   🔋 Body Battery : {bb if bb is not None else 'N/A'} (peak เช้า){bb_now_tag}  {_icon(bb,75,50)}")
     print(f"   💓 HRV          : {hrv_status}")
-    print(f"   ❤️  Resting HR   : {rhr} bpm  {_icon(rhr,50,58,invert=True)}" if rhr else "   ❤️  Resting HR   : N/A")
+    _rb = ATHLETE.get("rhr")
+    _rd = f"  (baseline {_rb}, {rhr - _rb:+d})" if (rhr and _rb) else ""
+    print(f"   ❤️  Resting HR   : {rhr} bpm{_rd}  {_icon(rhr, _rb + 4, _rb + 7, invert=True)}" if rhr else "   ❤️  Resting HR   : N/A")
     sleep_icon = _icon(sleep_score, 80, 60)
     print(f"   😴 Sleep Score  : {sleep_score}/100  {sleep_icon}" if sleep_score else "   😴 Sleep Score  : N/A")
     if stress_avg is not None:
@@ -460,13 +480,23 @@ def main():
         print("   ⚠️  ไม่สามารถตรวจสอบได้")
 
     # --- Training Decision + Plan ---
-    decision, reason = readiness_decision(bb, hrv_status, day_type, args.pain, taper_days)
+    decision, reason = readiness_decision(bb, hrv_status, day_type, args.pain, taper_days,
+                                          rhr=rhr, rhr_baseline=ATHLETE.get("rhr"))
     print(f"\n{SEP}")
     print(f"🎯 TODAY'S PLAN{taper_tag}")
     print(f"   {reason}")
     plan = build_action_plan(day_info, decision, day_type, taper_race, taper_days)
     for line in plan:
         print(line)
+
+    # Standing athlete constraints (athlete.json → coaching_constraints) —
+    # printed every brief so an LLM coach reading this output can't drift
+    # from preferences the athlete already stated.
+    _cc = ATHLETE.get("coaching_constraints") or []
+    if _cc:
+        print(f"\n📌 COACHING CONSTRAINTS (athlete.json — ห้ามละเมิด)")
+        for c in _cc:
+            print(f"   • {c}")
 
     if day_type not in ("strength", "rest"):
         print(f"   💡 ลู่ไฟฟ้า: ปรับ Incline 1.0% เสมอ (จำลองแรงต้านอากาศกลางแจ้ง) — คุมด้วย HR ไม่ใช่ GPS pace")

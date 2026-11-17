@@ -2,6 +2,33 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [1.5] — 2026-11-17
+
+Full-project review (sports-science / data / agent) → fixes below. Root theme: the suite was 107/107 green while a core output was physiologically absurd — tests checked formula *consistency*, not output *plausibility*.
+
+### Fixed
+- **`race_predictor.py` reported training-estimate VDOT 33.3 for a VDOT-40 athlete** — an I-session's `pace` field is the whole-activity average (WU + jog recoveries + CD, e.g. 6:21/km), which was treated as 5K race pace → single-session estimate 27.5; the 4:2:1 recency weighting over only 3 sessions let that one artefact dominate. Now: uses `rep_pace`/`quality_pace` when logged, and rejects any single-session estimate > ±5 VDOT from the race-confirmed value (printed, not silent).
+- **T-session estimator could only go UP** (`max(0, …)`) — biased by construction. Now symmetric when HR is above T-mid at a pace not faster than T pace; HR-only inference capped at ±3 VDOT.
+- **Contradictory label** "Fitness ใกล้เคียง baseline" printed for a −6.7 gap → tri-state (up / near / below) with the delta shown.
+- **Finished races kept appearing as goals** (Sponsor21 sub-1:52, Bangsaen sub-4) — goal lookup now takes only *upcoming* active races, nearest first; no FM goal section when none is upcoming.
+- **hrTSS anchored at the T-zone floor (174) instead of LTHR (183)** — every TSS was inflated ×((LTHR−RHR)/(174−RHR))² ≈ +14%, putting CTL/ATL on a private scale not comparable with hrTSS norms. `T_HR = ATHLETE["lthr"]`. Trends unchanged; absolute CTL drops ~12–13%.
+- **Readiness ignored resting HR** — `daily_brief.readiness_decision()` used only Body Battery + HRV status (BB is itself derived from HRV/stress → one channel counted twice). Added RHR vs `athlete.json` baseline: ≥ +5 bpm → no quality/long; ≥ +8 bpm → easy ≤40 min or rest. Brief shows the delta next to RHR.
+- **7 unit tests in `tools/tests/test_tools.py` had silently rotted** (hardcoded VDOT 38, T-zone 170, old phase dates) because that file never ran in CI → now derive from config.
+
+### Added
+- `athlete.json` → `fm_endurance_factor` (actual FM / VDOT-predicted FM; read via `config.ATHLETE`). Pure Daniels VDOT assumes full marathon endurance; `race_predictor` now prints both the raw and the personal-calibrated FM prediction.
+- `athlete.json` → `coaching_constraints` (list) — standing athlete preferences printed at the end of every daily brief so an LLM coach can't drift from them.
+- `race_predictor`: STALE warning when the newest usable quality session is > 28 days old.
+- `fix_session_bb.py` committed (was untracked but already called by `run_post_easy.sh` / `run_post_quality.sh` — would have broken fresh clones).
+- `garmin_workout_pusher.py --plan-file PATH` — push an arbitrary agreed plan instead of the prescriber's default.
+- `config.TRAINING_PHASES`: phase split so taper ends on the A-race date, + ATM21 recovery phase.
+
+### Prevention
+- **New PLAUSIBILITY section in `test_suite.py`** (13 checks → 120 total): artefact session can't drag the estimate outside the band, estimator not up-only, ±3 cap, goals are upcoming, hrTSS IF=1 at LTHR, RHR-based downgrades, endurance-factor bounds.
+- **CI now also runs `tools/tests/test_tools.py`** (72 unit tests).
+
+---
+
 ## [1.4] — 2026-09-09
 
 ### Fixed

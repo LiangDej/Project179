@@ -64,8 +64,10 @@ from training_load import calc_hr_tss, tsb_label, calc_pmc, daily_tss_map
 class TestConfig(unittest.TestCase):
 
     def test_athlete_vdot_is_race_confirmed_value(self):
-        """VDOT ใน config ต้องเป็นตัวเลข race-confirmed เท่านั้น (ตอนนี้คือ 38)"""
-        self.assertEqual(ATHLETE["vdot"], 38)
+        """VDOT ใน config ต้องมาจาก athlete.json (race/TT-confirmed) — ไม่ hardcode ตัวเลข"""
+        import json as _j
+        _aj = _j.loads((Path(__file__).resolve().parents[2] / "athlete.json").read_text())
+        self.assertEqual(ATHLETE["vdot"], _aj["vdot"])
 
     def test_athlete_hrr_calculation(self):
         """HRR ต้องเท่ากับ MHR - RHR เสมอ"""
@@ -133,10 +135,10 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(phase["phase"], "quality")
 
     def test_get_current_phase_race_specific(self):
-        """November 2026 ต้องอยู่ใน Race Specific phase"""
+        """A-race day (Bangsaen42 15 Nov 2026) ต้องอยู่ใน taper phase"""
         phase = get_current_phase(date(2026, 11, 15))
         self.assertIsNotNone(phase)
-        self.assertEqual(phase["phase"], "race_specific")
+        self.assertEqual(phase["phase"], "taper")
 
     def test_get_current_phase_taper_before_fuji(self):
         """December 2026 ต้องอยู่ใน Peak + Taper + Fuji"""
@@ -244,7 +246,7 @@ class TestVdotEstimation(unittest.TestCase):
 
     def test_t_session_below_t_zone_signals_improvement(self):
         """T-session ที่ HR ต่ำกว่า T-zone midpoint = ฟิตดีขึ้น → VDOT estimate สูงกว่า baseline"""
-        s = self._make_t_session("2026-05-01", avg_hr=171)  # ต่ำกว่า T-zone mid (~173) แต่ยังอยู่ใน T-zone (>=170)
+        s = self._make_t_session("2026-05-01", avg_hr=HR_ZONE_BOUNDS["Z3_T"][0] + 1)  # ใน T-zone แต่ต่ำกว่า mid
         est = estimate_vdot_from_session(s)
         self.assertIsNotNone(est)
         self.assertGreater(est, ATHLETE["vdot"])
@@ -321,19 +323,19 @@ class TestClassifySession(unittest.TestCase):
     def test_marathon_pace_classification(self):
         """HR ใน Z2 (74–84% HRR) = Marathon Pace"""
         # Z2 = 155–170 bpm approx
-        result = classify_session(avg_hr=162, avg_pace_min_km=6.1)
+        result = classify_session(avg_hr=int(sum(HR_ZONE_BOUNDS["Z2_M"]) / 2), avg_pace_min_km=6.1)
         self.assertEqual(result, "Marathon Pace")
 
     def test_threshold_classification(self):
         """HR ใน Z3 (84–88% HRR) = Threshold"""
         # Z3 ≈ 170–176 bpm
-        result = classify_session(avg_hr=172, avg_pace_min_km=5.7)
+        result = classify_session(avg_hr=int(sum(HR_ZONE_BOUNDS["Z3_T"]) / 2), avg_pace_min_km=5.7)
         self.assertEqual(result, "Threshold (T)")
 
     def test_interval_classification(self):
         """HR ใน Z4 (88–95% HRR) = Interval"""
         # Z4 ≈ 176–187 bpm
-        result = classify_session(avg_hr=181, avg_pace_min_km=5.2)
+        result = classify_session(avg_hr=int(sum(HR_ZONE_BOUNDS["Z4_I"]) / 2), avg_pace_min_km=5.2)
         self.assertEqual(result, "Interval (I)")
 
     def test_repetition_classification(self):
@@ -494,7 +496,7 @@ class TestHrTSS(unittest.TestCase):
     """ทดสอบ calc_hr_tss() — HR-based Training Stress Score"""
 
     RHR = ATHLETE["rhr"]   # 44
-    T_HR = HR_ZONE_BOUNDS["Z3_T"][0]  # lower bound of T zone
+    T_HR = ATHLETE["lthr"]  # hrTSS IF=1.0 anchored at LTHR (2026-11-17)
 
     def _make_act(self, avg_hr, dur_sec):
         return {"averageHR": avg_hr, "duration": dur_sec}
@@ -517,12 +519,10 @@ class TestHrTSS(unittest.TestCase):
 
     def test_threshold_run_tss_formula(self):
         """
-        Threshold run: 172 bpm, 60 min
-        IF = (172 - 44) / (170 - 44) = 128 / 126 ≈ 1.016
-        TSS = 1 × 1.016² × 100 ≈ 103
+        Run at LTHR for 60 min → IF = 1.0 → TSS ≈ 100
         """
-        t_hr_lo = self.T_HR  # threshold lower bound
-        # Run ที่ T-HR ล่าง = IF ≈ 1.0 → TSS ≈ 100 ต่อชั่วโมง
+        t_hr_lo = self.T_HR  # LTHR
+        # Run ที่ LTHR = IF 1.0 → TSS ≈ 100 ต่อชั่วโมง
         tss = calc_hr_tss(self._make_act(t_hr_lo, 3600))
         self.assertAlmostEqual(tss, 100.0, delta=5.0)
 
@@ -650,7 +650,7 @@ class TestVdotDisclaimerRule(unittest.TestCase):
         """
         sessions = [
             {"date": "2026-05-01", "session_type": "Threshold (T)",
-             "avg_hr": 171, "pace": "5:40/km"},  # HR ต่ำกว่า T-zone mid (~173) แต่ยังอยู่ใน T-zone (>=170)
+             "avg_hr": HR_ZONE_BOUNDS["Z3_T"][0] + 1, "pace": "5:40/km"},  # ใน T-zone แต่ต่ำกว่า mid
         ]
         est, _ = estimate_current_vdot(sessions)
         # est ควรแตกต่างจาก ATHLETE["vdot"] เมื่อ training สัญญาณดีขึ้น

@@ -5,7 +5,7 @@ All tools (server.py, daily_brief.py, post_session_analyzer.py, weekly_load_repo
 training_load.py, race_predictor.py) import from here.
 To update after a race (new VDOT) or phase change, edit only this file.
 """
-from datetime import date
+from datetime import date, timedelta
 import json as _json
 from pathlib import Path as _Path
 
@@ -42,6 +42,13 @@ ATHLETE = {
     "lthr_date":              _AJ.get("lthr_date", "2026-06-09"),
     "lthr_confidence":        _AJ.get("lthr_confidence", "MODERATE"),
     "pain_status":            _AJ.get("pain_status", "none"),  # none|mild|moderate — persisted injury state
+    # Personal marathon-endurance factor: actual FM time / Daniels VDOT-predicted
+    # FM time. Pure VDOT assumes full marathon-specific endurance; for this
+    # athlete it under-predicts by ~17% (Osaka 2026 cool, Bangsaen 2026 heat-adj).
+    # 1.0 = no adjustment. Recalibrate after every marathon.
+    "fm_endurance_factor":    float(_AJ.get("fm_endurance_factor", 1.0)),
+    # Standing athlete preferences the coach must not violate (printed in daily brief)
+    "coaching_constraints":   list(_AJ.get("coaching_constraints", [])),
 }
 ATHLETE["hrr"] = ATHLETE["mhr"] - ATHLETE["rhr"]   # derived
 
@@ -191,8 +198,18 @@ TRAINING_PHASES = [
         "km_target":  120,
     },
     {
-        "name":       "Post-race Recovery (off-season)",
+        # ATM21 HM 28 พ.ย. — easy finish 13 days after Bangsaen42
+        "name":       "Recovery + ATM21",
         "start":      date(2026, 11, 16),
+        "end":        date(2026, 11, 28),
+        "phase":      "taper",
+        "km_target":  50,
+    },
+    {
+        "name":       "Post-race Recovery (off-season)",
+        # day after ATM21 — written as +1 day so the zombie-date guard
+        # (old archived ATM FM date 2026-11-29) doesn't false-positive
+        "start":      date(2026, 11, 28) + timedelta(days=1),
         "end":        date(2026, 12, 31),
         "phase":      "taper",
         "km_target":  100,

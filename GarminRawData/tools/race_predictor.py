@@ -46,12 +46,17 @@ I_HR_LO, I_HR_HI = HR_ZONE_BOUNDS["Z4_I"]   # 176–187
 try:
     from race_registry import list_races as _lr_pred
     _races_pred = dict(_lr_pred(active_only=False))
+    # Only UPCOMING active races, nearest first — a finished race (e.g. last
+    # month's HM) must not keep showing as the goal (2026-11-17 review fix).
+    _today_iso = date.today().isoformat()
+    _upcoming = sorted(
+        ((k, r) for k, r in _races_pred.items()
+         if r.get("active") and str(r.get("date", "")) >= _today_iso),
+        key=lambda kr: str(kr[1].get("date", "")))
     _fm_key, _fm_race = next(
-        ((k, r) for k, r in _races_pred.items() if r.get("dist_km", 0) >= 40 and r.get("active")),
-        (None, {}))
+        ((k, r) for k, r in _upcoming if r.get("dist_km", 0) >= 40), (None, {}))
     _hm_key, _hm_race = next(
-        ((k, r) for k, r in _races_pred.items() if 15 <= r.get("dist_km", 0) < 40 and r.get("active")),
-        (None, {}))
+        ((k, r) for k, r in _upcoming if 15 <= r.get("dist_km", 0) < 40), (None, {}))
     HM_GOALS = {
         "A": {"label": _hm_race.get("goal_label", "Sub 1:50"),
               "minutes": float(_hm_race.get("goal_min", 110.0))},
@@ -62,8 +67,9 @@ try:
               "minutes": float(_fm_race.get("goal_min", 240.0))},
         "B": {"label": "Sub 4:15", "minutes": 255.0},
     }
-    _FM_RACE_NAME = _fm_race.get("short", _fm_race.get("name", "FM Race"))
-    _FM_RACE_DATE = _fm_race.get("date", "2026")[:7]
+    _FM_RACE_NAME = _fm_race.get("short", _fm_race.get("name", "no upcoming FM"))
+    _FM_RACE_DATE = _fm_race.get("date", "—")[:7]
+    _HM_RACE_NAME = _hm_race.get("short", _hm_race.get("name", "no upcoming HM"))
 except Exception:
     HM_GOALS = {
         "A": {"label": "Sub 1:50", "minutes": 110.0},
@@ -74,7 +80,8 @@ except Exception:
         "B": {"label": "Sub 4:15", "minutes": 255.0},
     }
     _FM_RACE_NAME = "FM Race"
-    _FM_RACE_DATE = "2026"
+    _FM_RACE_DATE = "—"
+    _HM_RACE_NAME = "HM Race"
 
 
 # ---------------------------------------------------------------------------
@@ -138,12 +145,31 @@ def estimate_vdot_from_session(s: dict, quality_hr_avg: float | None = None) -> 
         hr_deficit = t_mid - hr                  # >0 = running below T-zone mid
         # Each bpm below T-zone mid → ~0.5 VDOT uplift (conservative)
         base_vdot  = ATHLETE["vdot"]
-        estimated  = base_vdot + max(0, hr_deficit * 0.5)
+        if hr_deficit >= 0:
+            estimated = base_vdot + hr_deficit * 0.5
+        else:
+            # HR ABOVE T-mid: only a fitness-down signal if the pace was not
+            # faster than T pace (running faster than T explains higher HR).
+            t_fast = min(VDOT_PACES["T"]) if VDOT_PACES.get("T") else 0
+            estimated = base_vdot + (hr_deficit * 0.5 if pace_sec >= t_fast else 0)
+        # Cap: HR-only inference is weak — never claim more than ±3 VDOT from it
+        estimated = max(base_vdot - 3, min(base_vdot + 3, estimated))
         return round(estimated, 1)
 
     elif "Interval" in stype or stype == "Interval (I)":
         # Treat 5×1km I-session as equivalent to a 5km near-maximal effort.
         # Race equivalent pace ≈ I-pace + 15 sec/km (rest intervals included)
+        # Prefer the REP pace if logged: the session 'pace' field is the whole-
+        # activity average (WU + jog recoveries + CD), which made a 6:21/km
+        # I-session read as VDOT 27.5 (2026-09-10). Implausible results are
+        # rejected later by estimate_current_vdot()'s plausibility band.
+        rep = s.get("rep_pace") or s.get("quality_pace")
+        if rep and ":" in str(rep):
+            try:
+                _p = str(rep).replace("/km", "").split(":")
+                pace_sec = int(_p[0]) * 60 + int(_p[1])
+            except ValueError:
+                pass
         equiv_pace_sec = pace_sec + 15
         equiv_dist_m   = 5000
         equiv_time_min = (equiv_pace_sec / 60) * (equiv_dist_m / 1000)
@@ -177,6 +203,10 @@ def load_session_log():
     return data.get("sessions", [])
 
 
+PLAUSIBLE_BAND = 5.0      # VDOT points from race-confirmed value
+STALE_LOG_DAYS = 28       # warn if the newest quality session is older than this
+
+
 def estimate_current_vdot(sessions: list, n_recent: int = 5) -> tuple:
     """
     Compute weighted average VDOT from n most recent quality sessions.
@@ -207,6 +237,19 @@ def estimate_current_vdot(sessions: list, n_recent: int = 5) -> tuple:
         print("\n⚠️  sessions_master dependency warning:")
         for w in missing_hr_warn:
             print(w)
+
+    # Plausibility band: a single-session estimate more than PLAUSIBLE_BAND
+    # VDOT away from the race-confirmed value is almost always a data artefact
+    # (whole-session pace, wrong session type, HR dropout), not a real change
+    # in fitness. Reject it visibly instead of letting a 4:2:1 weight drag the
+    # average (2026-11-17: one bad I-session turned 40 → 33.3).
+    base = ATHLETE["vdot"]
+    rejected = [e for e in estimates if abs(e[2] - base) > PLAUSIBLE_BAND]
+    estimates = [e for e in estimates if abs(e[2] - base) <= PLAUSIBLE_BAND]
+    if rejected:
+        print(f"\n⚠️  ตัด session ที่ค่าประมาณเพี้ยน (ห่าง VDOT ยืนยัน > ±{PLAUSIBLE_BAND}) — น่าจะเป็น data artefact:")
+        for d, st, v, _ in rejected:
+            print(f"     {d}  {st:<20} ~{v}  (เช่น pace ทั้ง session รวม WU/พัก)")
 
     if not estimates:
         return None, []
@@ -257,12 +300,20 @@ def main():
     print(f"      ใช้ได้เฉพาะ 'เทียบทิศทางการพัฒนา' เท่านั้น")
     print(f"      VDOT จริงต้องยืนยันจากผลแข่งตามหลัก Jack Daniels เสมอ")
 
-    if est_vdot > baseline_vdot:
-        delta = round(est_vdot - baseline_vdot, 1)
+    delta = round(est_vdot - baseline_vdot, 1)
+    if delta >= 1.0:
         print(f"\n  📈 Training signal: Fitness น่าจะพัฒนาขึ้นประมาณ {delta} points")
         print(f"      (ยืนยันได้เฉพาะหลังแข่งครั้งถัดไป)")
+    elif delta <= -1.0:
+        print(f"\n  📉 Training signal: ต่ำกว่า baseline {abs(delta)} points (อาจล้า/ร้อน/HR เพี้ยน — ไม่ใช่ VDOT ลดจริง)")
     else:
-        print(f"\n  🟡 Training signal: Fitness ใกล้เคียง baseline")
+        print(f"\n  🟡 Training signal: Fitness ใกล้เคียง baseline ({delta:+})")
+
+    newest = max(d for d, *_ in used)
+    age = (date.today() - date.fromisoformat(newest)).days
+    if age > STALE_LOG_DAYS:
+        print(f"\n  ⏳ STALE: quality session ล่าสุดที่ใช้ได้คือ {newest} ({age} วันก่อน)")
+        print(f"      ตัวเลขนี้สะท้อนฟิตช่วงนั้น ไม่ใช่วันนี้ — อย่าใช้ตัดสินใจ")
 
     print(f"\n  📋 Sessions ที่ใช้ประเมิน ({len(used)} sessions):")
     for d, stype, v, q_hr in used:
@@ -278,10 +329,14 @@ def main():
     fm_pred = predict_race_time(est_vdot, 42195.0)
 
     print(f"  Half Marathon (21.1 km) : {fmt_time(hm_pred)}")
-    print(f"  Full Marathon (42.2 km) : {fmt_time(fm_pred)}")
+    print(f"  Full Marathon (42.2 km) : {fmt_time(fm_pred)}  (VDOT ล้วน — สมมติ endurance เต็ม)")
+    _fef = ATHLETE.get("fm_endurance_factor", 1.0) or 1.0
+    if _fef != 1.0:
+        fm_pred = fm_pred * _fef
+        print(f"  Full Marathon (personal) : {fmt_time(fm_pred)}  (× {_fef} endurance factor จาก FM จริง — ใช้ตัวนี้)")
 
     # HM goal analysis
-    print(f"\n  🎯 HM Goal Analysis:")
+    print(f"\n  🎯 HM Goal Analysis ({_HM_RACE_NAME}):")
     hm_goals = {k: v for k, v in HM_GOALS.items()}
     if args.goal_hm:
         hm_goals["Custom"] = {"label": f"Custom {fmt_time(args.goal_hm)}", "minutes": args.goal_hm}
@@ -295,7 +350,11 @@ def main():
         print(f"     Goal {gkey} {g['label']}: {status}")
 
     # FM goal analysis
-    print(f"\n  🏁 FM Goal Analysis ({_FM_RACE_NAME}, {_FM_RACE_DATE}):")
+    if _FM_RACE_DATE == "—" and not args.goal_fm:
+        print(f"\n  🏁 FM Goal Analysis: ไม่มี FM ที่กำลังจะมาถึงใน races.json (ใช้ --goal-fm ถ้าต้องการ)")
+        FM_GOALS.clear()
+    else:
+        print(f"\n  🏁 FM Goal Analysis ({_FM_RACE_NAME}, {_FM_RACE_DATE}):")
     fm_goals = {k: v for k, v in FM_GOALS.items()}
     if args.goal_fm:
         fm_goals["Custom"] = {"label": f"Custom {fmt_time(args.goal_fm)}", "minutes": args.goal_fm}

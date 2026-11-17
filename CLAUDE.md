@@ -92,9 +92,10 @@ PROJECT 179 — Garmin-connected Jack Daniels running coach agent.
 ## ✅ Test Suite — รันหลังแก้ tool/config/data ทุกครั้ง
 
 ```bash
-.venv/bin/python3.13 GarminRawData/tests/test_suite.py   # 30 checks, exit 0 = ผ่าน
+.venv/bin/python3.13 GarminRawData/tests/test_suite.py   # 120 checks, exit 0 = ผ่าน
+(cd GarminRawData/tools && ../../.venv/bin/python3.13 -m unittest tests.test_tools)   # 72 unit tests
 ```
-3 ชั้น: **UNIT** (สูตรแต่ละ tool) + **CONSISTENCY** (single-source invariants — รวม STATIC source-scan ที่จับ stale literal ทุก branch เช่น HR<155/170–176/VDOT38) + **FUNCTIONAL** (รัน flow จริง เทียบ output กับ config). จับ regression class: race-pace≠vdot_math, nutrition>80%, _classify_speed, ACWR, Fuji leak, Easy-ceiling≠config. แก้ค่าใน athlete.json/races.json แล้วรัน suite ต้องเขียวก่อนถือว่าเสร็จ.
+4 ชั้น: **PLAUSIBILITY** (output ต้องสมเหตุสมผลทางสรีรวิทยา ไม่ใช่แค่สูตรตรงกัน) + **UNIT** (สูตรแต่ละ tool) + **CONSISTENCY** (single-source invariants — รวม STATIC source-scan ที่จับ stale literal ทุก branch เช่น HR<155/170–176/VDOT38) + **FUNCTIONAL** (รัน flow จริง เทียบ output กับ config). จับ regression class: race-pace≠vdot_math, nutrition>80%, _classify_speed, ACWR, Fuji leak, Easy-ceiling≠config. แก้ค่าใน athlete.json/races.json แล้วรัน suite ต้องเขียวก่อนถือว่าเสร็จ.
 
 ## Daily Bash Scripts (use these — don't run tools manually)
 

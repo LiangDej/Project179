@@ -30,7 +30,11 @@ from config import ATHLETE, HR_ZONE_BOUNDS  # noqa: E402
 
 RHR = ATHLETE["rhr"]
 MHR = ATHLETE["mhr"]
-T_HR = HR_ZONE_BOUNDS["Z3_T"][0]   # lower bound of T zone ≈ threshold HR
+# hrTSS IF=1.0 must sit AT lactate threshold (LTHR), per the TrainingPeaks
+# hrTSS definition. Was the bottom of the T zone (174) — that inflated every
+# TSS by ((LTHR-RHR)/(174-RHR))² ≈ +14%, so CTL/ATL were on a private scale
+# (2026-11-17 review fix). Trends are unchanged; absolute CTL drops ~12-13%.
+T_HR = ATHLETE["lthr"]
 
 # Exponential decay constants
 K_CTL = 1 - math.exp(-1 / 42)   # τ = 42 days (Fitness)
