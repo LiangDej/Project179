@@ -393,10 +393,14 @@ def get_week_info(monday: date = None) -> dict:
 
     race      = RACE_TARGETS[DEFAULT_RACE]   # A-race จาก races.json (active_race)
     race_date = race["date"]
-    # Derive plan_start from config.TRAINING_PHASES — first base-phase Monday
-    # (skips taper/recovery phases at the very start)
+    # Derive plan_start from config.TRAINING_PHASES — first base-phase start of
+    # THIS race's season (within 52 weeks before the race). 2026-11-18 fix:
+    # it used the first base phase in the whole list, so once a 2027 season was
+    # added a Sep-2027 race would have been planned from May 2026 (week 70+).
+    _season_floor = race_date - timedelta(weeks=52)
     plan_start = next(
-        (p["start"] for p in TRAINING_PHASES if p["phase"] == "base"),
+        (p["start"] for p in TRAINING_PHASES
+         if p["phase"] == "base" and _season_floor < p["start"] <= race_date),
         date(2026, 5, 18),  # fallback if no base phase defined
     )
 

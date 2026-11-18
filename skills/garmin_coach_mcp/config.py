@@ -208,11 +208,60 @@ TRAINING_PHASES = [
     {
         "name":       "Post-race Recovery (off-season)",
         # day after ATM21 — written as +1 day so the zombie-date guard
-        # (old archived ATM FM date 2026-11-29) doesn't false-positive
+        # (old archived ATM FM date 2026-11-29) doesn't false-positive.
+        # Gate to leave: knee pain-free 14 d, RHR back at baseline, HRV balanced.
         "start":      date(2026, 11, 28) + timedelta(days=1),
-        "end":        date(2026, 12, 31),
+        "end":        date(2026, 12, 13),
         "phase":      "taper",
-        "km_target":  100,
+        "km_target":  60,
+    },
+    # ── 2027 SEASON — goal Sub-4 FM (races.json → sub4_2027, date = PLACEHOLDER) ──
+    # Agreed 2026-11-18. Diagnosis: sub-4 is limited by endurance factor (1.17),
+    # not VDOT — at VDOT 40 a factor of ~1.05 already gives ~4:01. So the season
+    # prioritises volume + 30–32 km long runs + fuelling rehearsal over speed.
+    # Phases after Feb are PROVISIONAL: re-anchor to the real race date once
+    # chosen (Tokyo lotto 20 Nov / Berlin 3 Dec) — keep taper ending on race day.
+    {
+        # Volume rebuild 30→50 km/wk (≤10 %/wk, deload every 4th), LR 14→22 km E,
+        # strides + hill sprints, knee strength per physio. Chest strap.
+        # Exit checkpoint (late Feb): LTHR retest w/ chest strap + 5K TT → VDOT.
+        "name":       "2027 Base Rebuild",
+        "start":      date(2026, 12, 14),
+        "end":        date(2027, 2, 28),
+        "phase":      "base",
+        "km_target":  180,
+    },
+    {
+        # T + I (not consecutive), 50–60 km/wk, LR 24–26 km. Target VDOT ≥42 (TT/race).
+        "name":       "2027 Quality Development",
+        "start":      date(2027, 3, 1),
+        "end":        date(2027, 5, 2),
+        "phase":      "quality",
+        "km_target":  220,
+    },
+    {
+        # Marathon build: LR to 30 km, M-pace finishes, fuelling every long run.
+        "name":       "2027 Marathon Build (provisional)",
+        "start":      date(2027, 5, 3),
+        "end":        date(2027, 8, 1),
+        "phase":      "quality",
+        "km_target":  250,
+    },
+    {
+        # ≥3 long runs 30–32 km (the missing piece in 2026), M-pace 8–12 km tails,
+        # 60–70 km/wk peak. Target endurance factor ≤1.10.
+        "name":       "2027 Race Specific (provisional)",
+        "start":      date(2027, 8, 2),
+        "end":        date(2027, 9, 12),
+        "phase":      "race_specific",
+        "km_target":  270,
+    },
+    {
+        "name":       "2027 Taper (provisional)",
+        "start":      date(2027, 9, 13),
+        "end":        date(2027, 9, 26),
+        "phase":      "taper",
+        "km_target":  120,
     },
 ]
 

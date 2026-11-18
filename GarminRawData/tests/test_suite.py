@@ -365,7 +365,8 @@ def consistency_tests():
           f"active_race={active_date_str}, taper_ends={[p['end'].isoformat() for p in taper_phases]}")
 
     race_specific_on_race_day = [p for p in config.TRAINING_PHASES
-                                  if p["phase"] == "race_specific" and p["end"] >= active_date]
+                                  if p["phase"] == "race_specific" and p["end"] >= active_date
+                                  and p["start"] <= active_date]   # later seasons (e.g. 2027) are not this race's block
     check("phases: race_specific does NOT extend to/past race day",
           not race_specific_on_race_day,
           f"offending={[p['name'] for p in race_specific_on_race_day]}")
@@ -553,6 +554,15 @@ def plausibility_tests():
           rp._FM_RACE_DATE == "—" or rp._FM_RACE_DATE >= today[:7], rp._FM_RACE_DATE)
     fef = A.get("fm_endurance_factor", 1.0)
     check("plausibility: fm_endurance_factor within 1.0–1.4", 1.0 <= fef <= 1.4, str(fef))
+    # FM goal VDOT must account for the endurance factor (2026-11-18: printed
+    # "need VDOT 37.9 (gap +-3.2)" for sub-4 at VDOT 41 / factor 1.17)
+    r_pure = rp.fm_goal_requirements(240, 40, 1.0)
+    r_fef  = rp.fm_goal_requirements(240, 40, 1.17)
+    check("plausibility: FM goal VDOT needed rises with endurance factor",
+          r_fef["vdot_needed"] > r_pure["vdot_needed"] and r_fef["vdot_gap"] > 0,
+          f"pure={r_pure} fef={r_fef}")
+    check("plausibility: factor needed at current VDOT is between 1.0 and current factor",
+          1.0 <= r_fef["factor_needed_at_current_vdot"] < 1.17, str(r_fef))
 
     rb = A["rhr"]
     d1, _ = db.readiness_decision(80, "balanced", "quality1", rhr=rb + 9, rhr_baseline=rb)

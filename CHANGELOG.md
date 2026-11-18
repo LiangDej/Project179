@@ -2,6 +2,18 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [Unreleased]
+
+### Fixed
+- **race_predictor FM goal VDOT ignored the endurance factor** — the "need VDOT X" line used `compute_vdot(42195, goal)` (pure prediction) while the gap beside it used the personal (× `fm_endurance_factor`) prediction, printing e.g. "ยังขาด 22:41 | ต้องการ VDOT 37.9 (gap +-3.2)" for sub-4 at VDOT 41 — a goal that looked already met. New `fm_goal_requirements()` solves for goal ÷ factor, and also reports the endurance factor that would hit the goal at the current VDOT. HM/FM gap now formats with sign (`+4.7`, not `+-3.2`).
+- **training_planner plan start picked the first base phase in the whole list** (May 2026) — with a 2027 season added, a Sep-2027 race would be planned from week 70+. Now uses the first base phase within 52 weeks before the race (ATM21 week numbering unchanged: wk 27).
+
+### Added
+- `TRAINING_PHASES`: 2027 season (Base Rebuild → Quality Development → Marathon Build → Race Specific → Taper) toward a placeholder sub-4 FM; post-ATM recovery shortened to end 13 Dec. Phases after Feb are provisional until a real race is chosen.
+
+### Prevention
+- test_suite: 2 plausibility checks for FM goal requirements (VDOT needed must rise with factor; factor needed lies between 1.0 and current). Phase check "race_specific does not cover race day" now only looks at the active race's own season, so a future season's block is not a false positive. 133 checks.
+
 ## [1.6] — 2026-11-17
 
 Theme: **reduce coach-agent hallucination by moving judgment and arithmetic into tested code** — every recurring agent mistake this cycle traced back to the agent computing or remembering something a tool should own.

@@ -90,6 +90,28 @@ except Exception:
 # compute_vdot and predict_race_time imported above from vdot_math
 
 
+def fm_goal_requirements(goal_min: float, vdot: float, factor: float = 1.0) -> dict:
+    """What a marathon goal really demands, given the athlete's endurance factor.
+
+    Why (2026-11-18 fix): the old goal line computed `compute_vdot(42195, goal)`
+    — the VDOT whose *pure* FM prediction hits the goal — while the gap shown
+    next to it came from the *personal* (× factor) prediction. With factor 1.17
+    that printed "need VDOT 37.9 (gap +-3.2)" for sub-4 at VDOT 41: a goal that
+    looked already reached while the same line said 22 min short.
+    The VDOT that actually delivers the goal is the one whose pure prediction
+    equals goal / factor. Also returns the endurance factor that would deliver
+    the goal at the current VDOT (the other lever: long runs / fuelling / heat).
+    """
+    factor = factor or 1.0
+    vdot_needed = compute_vdot(42195.0, goal_min / factor)
+    raw_pred = predict_race_time(vdot, 42195.0)
+    return {
+        "vdot_needed": round(vdot_needed, 1) if vdot_needed else None,
+        "vdot_gap": round((vdot_needed or 0) - vdot, 1),
+        "factor_needed_at_current_vdot": round(goal_min / raw_pred, 3) if raw_pred else None,
+    }
+
+
 def fmt_time(minutes: float) -> str:
     """Format decimal minutes to H:MM:SS."""
     total_sec = int(round(minutes * 60))
@@ -346,7 +368,7 @@ def main():
         gap_vdot    = ATHLETE["vdot"]  # approximate: 1 VDOT ≈ 2-3 min HM
         vdot_needed = compute_vdot(21097.5, goal_min)
         vdot_gap    = round((vdot_needed or 0) - est_vdot, 1)
-        status      = "✅ ทำได้แล้วตามฟิตปัจจุบัน" if gap_min <= 0 else f"⚠️  ยังขาด {fmt_time(abs(gap_min))} | ต้องการ VDOT {vdot_needed:.1f} (gap +{vdot_gap})"
+        status      = "✅ ทำได้แล้วตามฟิตปัจจุบัน" if gap_min <= 0 else f"⚠️  ยังขาด {fmt_time(abs(gap_min))} | ต้องการ VDOT {vdot_needed:.1f} (gap {vdot_gap:+})"
         print(f"     Goal {gkey} {g['label']}: {status}")
 
     # FM goal analysis
@@ -360,11 +382,17 @@ def main():
         fm_goals["Custom"] = {"label": f"Custom {fmt_time(args.goal_fm)}", "minutes": args.goal_fm}
     for gkey, g in fm_goals.items():
         goal_min    = g["minutes"]
-        gap_min     = fm_pred - goal_min
-        vdot_needed = compute_vdot(42195.0, goal_min)
-        vdot_gap    = round((vdot_needed or 0) - est_vdot, 1)
-        status      = "✅ ทำได้แล้ว (แต่ต้องผ่าน race-specific training ก่อน)" if gap_min <= 0 else f"⚠️  ยังขาด {fmt_time(abs(gap_min))} | ต้องการ VDOT {vdot_needed:.1f} (gap +{vdot_gap})"
+        gap_min     = fm_pred - goal_min          # fm_pred is already × factor
+        req         = fm_goal_requirements(goal_min, est_vdot, _fef)
+        if gap_min <= 0:
+            status = "✅ ทำได้แล้ว (แต่ต้องผ่าน race-specific training ก่อน)"
+        else:
+            status = (f"⚠️  ยังขาด {fmt_time(abs(gap_min))} | ต้องการ VDOT {req['vdot_needed']} "
+                      f"(gap {req['vdot_gap']:+}) ที่ endurance factor {_fef}")
         print(f"     Goal {gkey} {g['label']}: {status}")
+        if gap_min > 0 and _fef != 1.0 and req["factor_needed_at_current_vdot"]:
+            print(f"        ↳ หรือ: VDOT เท่าเดิม แต่ลด endurance factor เหลือ ≤ "
+                  f"{req['factor_needed_at_current_vdot']} (long run 30-32 km / fuelling / สนามเย็น)")
 
     print(f"\n  ─────────────────────────────────────────────────────────")
     print(f"  ⚠️  DISCLAIMER (Jack Daniels Protocol)")
