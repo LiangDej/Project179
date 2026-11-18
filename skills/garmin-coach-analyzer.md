@@ -64,8 +64,8 @@ bash run_post_race.sh hm H:MM:SS --temp 27 [--apply]    # หลังแข่�
 ### เลือก tool ให้ถูก (คู่ที่สับสนง่าย)
 | ถาม | ใช้ | ไม่ใช่ |
 |---|---|---|
-| VDOT ตอนนี้/พัฒนาไหม | vdot_estimator | race_predictor |
-| วิ่ง HM/FM ได้เวลาเท่าไหร่ | race_predictor (ใช้บรรทัด **personal** FM) | vdot_estimator |
+| VDOT ตอนนี้/พัฒนาไหม | race_predictor `--json` (training_estimate + breakthroughs) | — (vdot_estimator ถูกรวมแล้ว v1.7) |
+| วิ่ง HM/FM ได้เวลาเท่าไหร่ | race_predictor (ใช้ **fm_personal**) | fm_vdot_only |
 | ตารางสัปดาห์ | session_prescriber | training_planner (ทั้งฤดู) |
 | ปรับ pace ตามอากาศวันแข่ง | weather_adjuster | heat_acclimation (ระยะยาว) |
 | CTL/ATL/TSB รายวัน | training_load | weekly_load_report (รายสัปดาห์) |

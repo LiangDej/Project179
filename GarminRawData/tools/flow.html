@@ -25,7 +25,7 @@
 <body>
 
 <h1>🏃 PROJECT 179 — System Flow v2</h1>
-<p class="sub">Updated · vdot_estimator: quality-lap pace from sessions_master (GPS) · TM sessions use belt_speed · Ely heat correction</p>
+<p class="sub">Updated · race_predictor: training estimate + breakthrough (quality-lap pace, Ely heat-adj, TM excluded) — vdot_estimator merged v1.7</p>
 
 <div class="wrap">
 <div class="mermaid">
@@ -97,7 +97,7 @@ flowchart LR
     direction TB
     PSA_Q["post_session_analyzer.py\n--update-log"]:::tool
     TMP_Q["tm_patch.py\nbelt_speed > HR-inferred"]:::tool
-    VE["vdot_estimator.py\nBreakthrough · Trend"]:::tool
+    VE["race_predictor.py\nEstimate · Breakthrough"]:::tool
     SS_Q["skill_sync.py"]:::tool
   end
 
@@ -106,7 +106,7 @@ flowchart LR
     direction TB
     PRU["post_race_updater.py\nVDOT → config.py"]:::tool
     PSA_R["post_session_analyzer.py\n--update-log"]:::tool
-    VE_R["vdot_estimator.py"]:::tool
+    VE_R["race_predictor.py"]:::tool
     SS_R["skill_sync.py"]:::tool
   end
 

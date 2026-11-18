@@ -1,7 +1,7 @@
 """
 vdot_math.py — Single source for Jack Daniels VDOT formulas.
 
-Imported by: race_predictor.py, vdot_estimator.py, post_race_updater.py
+Imported by: race_predictor.py, post_race_updater.py
 DO NOT duplicate these formulas elsewhere.
 
 Reference: Daniels, J. (2014). Daniels' Running Formula, 3rd ed.

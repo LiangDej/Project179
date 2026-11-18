@@ -231,11 +231,11 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 ### VDOT & Performance
 
-**`vdot_estimator.py`** — Estimate VDOT from training
+**`race_predictor.py`** — Estimate VDOT from training (one training estimate + breakthrough sessions — vdot_estimator merged in v1.7)
 
 | Say | You get |
 |---|---|
-| "What's my VDOT right now?" | Training-based VDOT estimate from quality sessions (last 8 weeks) + disclaimer that race confirmation is needed |
+| "What's my VDOT right now?" | A single training estimate (HR vs T-zone) + breakthrough sessions + disclaimer that race confirmation is needed |
 | "Have I improved over the last 3 months?" | VDOT trend + session HR drift over 3 months |
 
 ---

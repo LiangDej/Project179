@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Changed
+- **`vdot_estimator.py` merged into `race_predictor.py` and removed (35 tools).** Two tools answered "what's my VDOT?" with different methods and contradictory results on the same day (race_predictor: training estimate +1.1; vdot_estimator: "−8.9 gap" from a top-3 pace-only average). A pace-only average of *training* sessions systematically under-reads (training pace < race effort), so it was dropped. Its one useful part — the **breakthrough flag** (an outdoor quality session whose heat-adjusted quality-lap pace alone implies VDOT ≥ confirmed + 1) — now lives in `race_predictor.find_breakthroughs()` as a list of sessions, not a second number. Interval reps get the same +15 s/km continuous-effort equivalent as the estimator (a 4:16 5×1 km had read as "VDOT 46"), and results beyond the ±5 plausibility band are dropped as artefacts.
+- `race_predictor.py --json` (human report → stderr): confirmed VDOT, training estimate + staleness, sessions used, predictions (`fm_vdot_only` / `fm_personal`), goals, breakthroughs — for agents to narrate.
+- `run_post_quality.sh` / `run_post_race.sh` call `race_predictor.py`; skill file, README, CLAUDE.md, flow.html updated.
+
+### Prevention
+- test_suite: vdot_estimator must stay merged (file absent, no script references); breakthrough pace-VDOT must lie within confirmed +1…+5; `--json` carries the required keys. 136 checks.
+
 ### Fixed
 - **race_predictor FM goal VDOT ignored the endurance factor** — the "need VDOT X" line used `compute_vdot(42195, goal)` (pure prediction) while the gap beside it used the personal (× `fm_endurance_factor`) prediction, printing e.g. "ยังขาด 22:41 | ต้องการ VDOT 37.9 (gap +-3.2)" for sub-4 at VDOT 41 — a goal that looked already met. New `fm_goal_requirements()` solves for goal ÷ factor, and also reports the endurance factor that would hit the goal at the current VDOT. HM/FM gap now formats with sign (`+4.7`, not `+-3.2`).
 - **training_planner plan start picked the first base phase in the whole list** (May 2026) — with a 2027 season added, a Sep-2027 race would be planned from week 70+. Now uses the first base phase within 52 weeks before the race (ATM21 week numbering unchanged: wk 27).
@@ -12,7 +20,7 @@
 - `TRAINING_PHASES`: 2027 season (Base Rebuild → Quality Development → Marathon Build → Race Specific → Taper) toward a placeholder sub-4 FM; post-ATM recovery shortened to end 13 Dec. Phases after Feb are provisional until a real race is chosen.
 
 ### Prevention
-- test_suite: 2 plausibility checks for FM goal requirements (VDOT needed must rise with factor; factor needed lies between 1.0 and current). Phase check "race_specific does not cover race day" now only looks at the active race's own season, so a future season's block is not a false positive. 133 checks.
+- test_suite (v1.7 pre-merge): 2 plausibility checks for FM goal requirements (VDOT needed must rise with factor; factor needed lies between 1.0 and current). Phase check "race_specific does not cover race day" now only looks at the active race's own season, so a future season's block is not a false positive. 133 checks.
 
 ## [1.6] — 2026-11-17
 

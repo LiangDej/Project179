@@ -7,7 +7,7 @@ overlays the most recent activities pulled live from Garmin, deduped by
 activityId. If Garmin is unreachable it falls back to the file silently.
 
 Why this exists:
-  ก่อนหน้านี้ training_load / weekly_load_report / vdot_estimator อ่านไฟล์ตรงๆ
+  ก่อนหน้านี้ training_load / weekly_load_report / vdot_estimator (รวมเข้า race_predictor v1.7) อ่านไฟล์ตรงๆ
   ถ้าไฟล์ค้าง (ยังไม่ sync) → volume ขาด + ATL ต่ำเกิน → TSB สูงเกินจริง
   (เคยทำ daily brief โชว์ TSB +24 ทั้งที่จริง ~0). ตัวนี้กันปัญหานั้นถาวร.
 

@@ -8,7 +8,7 @@
 >
 > ⚠️ **ตัวเลข pace/HR ในไฟล์นี้ (เช่น T-pace 5:35–5:45/km, HR 170–176) เป็นค่าตัวอย่างของ athlete ต้นฉบับเท่านั้น**
 > (VDOT/LTHR ค่าหนึ่ง) — ถ้าเทสกับ athlete.json ของคุณเอง (VDOT/LTHR ต่างกัน) ให้เช็คว่า Agent
-> คำนวณ pace/HR ตรงกับ `config.py`/`vdot_estimator.py` ของ **athlete.json ปัจจุบัน** ไม่ใช่ตัวเลขที่ hardcode ไว้ในไฟล์นี้
+> คำนวณ pace/HR ตรงกับ `config.py`/`race_predictor.py` ของ **athlete.json ปัจจุบัน** ไม่ใช่ตัวเลขที่ hardcode ไว้ในไฟล์นี้
 
 ---
 

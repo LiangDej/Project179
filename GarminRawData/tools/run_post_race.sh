@@ -106,7 +106,7 @@ echo "📌 Fetching latest activity (race session)..."
 echo ""
 echo "▶ Step 3/4 — VDOT Trend (updated baseline)"
 echo "────────────────────────────────────"
-"$VENV_PYTHON" vdot_estimator.py
+"$VENV_PYTHON" race_predictor.py
 
 # ── Step 4: Sync skill file ─────────────────────────────────────────────────
 echo ""

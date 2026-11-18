@@ -22,7 +22,7 @@ CASE 3: TM Time Trial (30-min TT protocol)
   → นี่คือ gold standard สำหรับ LT2 + T-pace calibration
 
 CASE 4: Training session estimate
-  → ห้าม apply เด็ดขาด → ใช้ vdot_estimator.py เพื่อดู trend เท่านั้น
+  → ห้าม apply เด็ดขาด → ใช้ race_predictor.py เพื่อดู trend เท่านั้น
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

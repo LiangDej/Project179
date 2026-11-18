@@ -1240,7 +1240,7 @@ def _run(args):
     # Previously this ran unconditionally for every session type, so an
     # ad-hoc "just check this run" call on a QUALITY session silently wrote
     # sessions_master.json without sessions.json, causing 3+ weeks of drift
-    # (vdot_estimator/race_predictor/skill_sync all read sessions.json only).
+    # (race_predictor/skill_sync all read sessions.json only).
     is_easy_session = r.get("session_type") == "Easy Run"
     if is_easy_session or args.update_log:
         try:

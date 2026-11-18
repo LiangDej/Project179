@@ -43,9 +43,9 @@ echo "────────────────────────�
 
 # ── Step 2: VDOT trend ──────────────────────────────────────────────────────
 echo ""
-echo "▶ Step 2/3 — VDOT Estimator"
+echo "▶ Step 2/3 — Training estimate + breakthrough (race_predictor)"
 echo "────────────────────────────────────"
-"$(bash "$TOOLS_DIR/get_python.sh")" vdot_estimator.py
+"$(bash "$TOOLS_DIR/get_python.sh")" race_predictor.py
 
 # ── Step 3: Stamina patch ───────────────────────────────────────────────────
 echo ""

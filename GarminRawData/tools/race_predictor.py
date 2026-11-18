@@ -17,6 +17,8 @@ Usage:
     python3 race_predictor.py               # ประเมินฟิตปัจจุบัน + predict
     python3 race_predictor.py --goal-hm 110 # Sub 1:50 HM (110 นาที)
     python3 race_predictor.py --goal-fm 240 # Sub 4:00 FM (240 นาที)
+    python3 race_predictor.py --json        # JSON for AI agents (also lists breakthrough sessions;
+                                            #   replaces vdot_estimator.py, merged v1.7)
 """
 
 from __future__ import annotations
@@ -195,7 +197,7 @@ def estimate_vdot_from_session(s: dict, quality_hr_avg: float | None = None) -> 
         equiv_pace_sec = pace_sec + 15
         equiv_dist_m   = 5000
         equiv_time_min = (equiv_pace_sec / 60) * (equiv_dist_m / 1000)
-        # Enforce 3000m min to match vdot_estimator.py threshold (audit fix)
+        # Enforce 3000m min (same threshold as find_breakthroughs)
         return compute_vdot(equiv_dist_m, equiv_time_min, min_dist_m=3000)
 
     return None
@@ -285,14 +287,110 @@ def estimate_current_vdot(sessions: list, n_recent: int = 5) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# Breakthrough detector (merged from vdot_estimator.py, v1.7)
+# ---------------------------------------------------------------------------
+# Why merged: vdot_estimator printed its OWN "VDOT estimate" (top-3 pace-only,
+# heat-adjusted) next to this tool's HR-based estimate. Same question, two
+# answers (2026-11-18: +1.1 here vs "−8.9 gap" there). Training pace is below
+# race effort, so a pace-only average systematically under-reads — useless as
+# an estimate. What WAS useful is the breakthrough flag: a quality session whose
+# heat-adjusted quality-lap pace alone implies VDOT ≥ confirmed + 1. That is a
+# one-way signal (it can only say "faster than expected"), so it survives here
+# as a list of sessions — no second averaged number.
+BREAKTHROUGH_THRESHOLD = 1.0
+BREAKTHROUGH_WEEKS     = 8
+
+
+def _pace_to_sec(p) -> float | None:
+    p = str(p or "").replace("/km", "").strip()
+    if ":" not in p:
+        return None
+    try:
+        m, s = p.split(":")
+        return int(m) * 60 + int(s)
+    except ValueError:
+        return None
+
+
+def find_breakthroughs(sessions: list, weeks: int = BREAKTHROUGH_WEEKS) -> list:
+    """Outdoor quality sessions whose heat-adjusted quality-lap pace implies
+    VDOT ≥ confirmed + BREAKTHROUGH_THRESHOLD. Treadmill sessions are skipped
+    (belt/HR-inferred pace is not a performance measurement)."""
+    master = {}
+    if MASTER_PATH.exists():
+        with open(MASTER_PATH, encoding="utf-8") as f:
+            for m in json.load(f).get("sessions", []):
+                if m.get("activity_id"):
+                    master[int(m["activity_id"])] = m
+    try:
+        from bangkok_climate import morning_temp_c, ely_penalty_fraction
+    except Exception:
+        morning_temp_c = ely_penalty_fraction = None
+
+    cutoff = (date.today() - timedelta(weeks=weeks)).isoformat()
+    base = ATHLETE["vdot"]
+    out = []
+    for s in sessions:
+        if s.get("session_type") not in {"Threshold (T)", "Interval (I)", "Tempo", "Fast Finish"}:
+            continue
+        if s.get("date", "") < cutoff or s.get("is_treadmill"):
+            continue
+        m = master.get(int(s["activity_id"])) if s.get("activity_id") else None
+        if not m:
+            continue
+        q_laps = [l for l in (m.get("laps") or []) if l.get("role") == "quality"]
+        dist_km = sum(l.get("distance_km", 0) for l in q_laps)
+        dur_s = sum(l.get("duration_s", 0) for l in q_laps)
+        if dist_km < 3.0 or dur_s <= 0:
+            continue
+        pace = dur_s / dist_km
+        month = int(s["date"][5:7])
+        pen = ely_penalty_fraction(morning_temp_c(month)) if ely_penalty_fraction else 0.0
+        adj = pace / (1 + pen)
+        # Interval reps have recoveries between them — the summed rep pace is
+        # not a continuous effort. Same +15 s/km race-equivalent as
+        # estimate_vdot_from_session (a 4:16 5×1km read as "VDOT 46" without it).
+        if "Interval" in s["session_type"]:
+            adj += 15
+        v = compute_vdot(dist_km * 1000, dist_km * adj / 60, min_dist_m=3000)
+        if v and v > base + PLAUSIBLE_BAND:
+            continue                       # artefact (wrong laps/type), not a breakthrough
+        if v and v >= base + BREAKTHROUGH_THRESHOLD:
+            out.append({"date": s["date"], "session_type": s["session_type"],
+                        "quality_km": round(dist_km, 2), "pace": fmt_pace(pace),
+                        "pace_equiv": fmt_pace(adj), "pace_vdot": round(v, 1)})
+    return sorted(out, key=lambda x: x["date"])
+
+
+def fmt_pace(sec: float) -> str:
+    s = int(round(sec))
+    return f"{s // 60}:{s % 60:02d}/km"
+
+
+# ---------------------------------------------------------------------------
 # Main output
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--goal-hm", type=float, default=None, help="HM goal in minutes (e.g. 110 for Sub 1:50)")
     parser.add_argument("--goal-fm", type=float, default=None, help="FM goal in minutes (e.g. 240 for Sub 4:00)")
+    parser.add_argument("--json", action="store_true",
+                        help="Machine-readable summary on stdout (human report → stderr) — for AI agents")
     args = parser.parse_args()
+    if args.json:
+        import contextlib
+        with contextlib.redirect_stdout(sys.stderr):
+            result = _run(args)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        _run(args)
 
+
+def _run(args) -> dict:
+    result = {"date": date.today().isoformat(), "vdot_confirmed": ATHLETE["vdot"],
+              "vdot_confirmed_date": ATHLETE.get("vdot_calibration_date"),
+              "training_estimate": None,
+              "note": "training_estimate ≠ VDOT. VDOT changes only from a race/TT."}
     sessions = load_session_log()
 
     print(f"\n{'='*60}")
@@ -303,14 +401,16 @@ def main():
         print("⚠️  ไม่พบ session log — รัน:")
         print("   python3 post_session_analyzer.py --latest --update-log")
         print(f"{'='*60}\n")
-        return
+        result["error"] = "no session log"
+        return result
 
     est_vdot, used = estimate_current_vdot(sessions)
 
     if not est_vdot:
         print("⚠️  ไม่มี quality session ในlog ที่ประเมิน VDOT ได้")
         print(f"{'='*60}\n")
-        return
+        result["error"] = "no usable quality session"
+        return result
 
     baseline_vdot = ATHLETE["vdot"]
 
@@ -337,6 +437,14 @@ def main():
         print(f"\n  ⏳ STALE: quality session ล่าสุดที่ใช้ได้คือ {newest} ({age} วันก่อน)")
         print(f"      ตัวเลขนี้สะท้อนฟิตช่วงนั้น ไม่ใช่วันนี้ — อย่าใช้ตัดสินใจ")
 
+    result.update({
+        "training_estimate": est_vdot, "delta_vs_confirmed": delta,
+        "newest_session": newest, "newest_session_age_days": age,
+        "stale": age > STALE_LOG_DAYS,
+        "sessions_used": [{"date": d, "type": t, "estimate": v, "quality_hr": q}
+                          for d, t, v, q in used],
+    })
+
     print(f"\n  📋 Sessions ที่ใช้ประเมิน ({len(used)} sessions):")
     for d, stype, v, q_hr in used:
         hr_note = f" | quality HR: {q_hr}" if q_hr else ""
@@ -353,9 +461,13 @@ def main():
     print(f"  Half Marathon (21.1 km) : {fmt_time(hm_pred)}")
     print(f"  Full Marathon (42.2 km) : {fmt_time(fm_pred)}  (VDOT ล้วน — สมมติ endurance เต็ม)")
     _fef = ATHLETE.get("fm_endurance_factor", 1.0) or 1.0
+    result["predictions"] = {"hm": fmt_time(hm_pred), "fm_vdot_only": fmt_time(fm_pred),
+                             "fm_endurance_factor": _fef}
     if _fef != 1.0:
         fm_pred = fm_pred * _fef
         print(f"  Full Marathon (personal) : {fmt_time(fm_pred)}  (× {_fef} endurance factor จาก FM จริง — ใช้ตัวนี้)")
+    result["predictions"]["fm_personal"] = fmt_time(fm_pred)
+    result["goals"] = []
 
     # HM goal analysis
     print(f"\n  🎯 HM Goal Analysis ({_HM_RACE_NAME}):")
@@ -370,6 +482,10 @@ def main():
         vdot_gap    = round((vdot_needed or 0) - est_vdot, 1)
         status      = "✅ ทำได้แล้วตามฟิตปัจจุบัน" if gap_min <= 0 else f"⚠️  ยังขาด {fmt_time(abs(gap_min))} | ต้องการ VDOT {vdot_needed:.1f} (gap {vdot_gap:+})"
         print(f"     Goal {gkey} {g['label']}: {status}")
+        result["goals"].append({"dist": "HM", "race": _HM_RACE_NAME, "key": gkey, "label": g["label"],
+                                "goal": fmt_time(goal_min), "met": gap_min <= 0,
+                                "short_by": None if gap_min <= 0 else fmt_time(gap_min),
+                                "vdot_needed": round(vdot_needed, 1) if vdot_needed else None})
 
     # FM goal analysis
     if _FM_RACE_DATE == "—" and not args.goal_fm:
@@ -393,6 +509,23 @@ def main():
         if gap_min > 0 and _fef != 1.0 and req["factor_needed_at_current_vdot"]:
             print(f"        ↳ หรือ: VDOT เท่าเดิม แต่ลด endurance factor เหลือ ≤ "
                   f"{req['factor_needed_at_current_vdot']} (long run 30-32 km / fuelling / สนามเย็น)")
+        result["goals"].append({"dist": "FM", "race": _FM_RACE_NAME, "key": gkey, "label": g["label"],
+                                "goal": fmt_time(goal_min), "met": gap_min <= 0,
+                                "short_by": None if gap_min <= 0 else fmt_time(gap_min),
+                                "vdot_needed_at_current_factor": req["vdot_needed"],
+                                "factor_needed_at_current_vdot": req["factor_needed_at_current_vdot"]})
+
+    # Breakthrough sessions (pace-only, heat-adjusted) — one-way "faster than expected" flag
+    bts = find_breakthroughs(sessions)
+    result["breakthroughs"] = bts
+    print(f"\n  ⚡ Breakthrough ({BREAKTHROUGH_WEEKS} สัปดาห์, outdoor quality, pace ปรับร้อน ≥ VDOT ยืนยัน +{BREAKTHROUGH_THRESHOLD}):")
+    if bts:
+        for b in bts:
+            print(f"     {b['date']}  {b['session_type']:<14} {b['quality_km']}km @ {b['pace']}"
+                  f" → {b['pace_equiv']} [ปรับร้อน+เทียบวิ่งต่อเนื่อง] | pace-VDOT {b['pace_vdot']}")
+        print(f"     → สัญญาณว่าอาจพร้อม TT/แข่งเพื่อยืนยัน VDOT ใหม่ (ยังไม่ใช่ VDOT จริง)")
+    else:
+        print(f"     ไม่มี")
 
     print(f"\n  ─────────────────────────────────────────────────────────")
     print(f"  ⚠️  DISCLAIMER (Jack Daniels Protocol)")
@@ -400,6 +533,7 @@ def main():
     print(f"     ห้ามใช้อัพเดต VDOT ใน config.py หรือ skill file")
     print(f"     VDOT จะอัพเดตได้เมื่อมีผลแข่งจริงเท่านั้น")
     print(f"{'='*60}\n")
+    return result
 
 
 if __name__ == "__main__":

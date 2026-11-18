@@ -5,7 +5,7 @@
 
 | Legacy (archived) | แทนด้วย (tools/) |
 |---|---|
-| `analyze_quality_progress.py` | `vdot_estimator.py`, `session_logger.py --summary` |
+| `analyze_quality_progress.py` | `race_predictor.py`, `session_logger.py --summary` |
 | `analyze_race_comparison.py`  | `race_predictor.py`, `post_session_analyzer.py` |
 
 เก็บไว้เผื่ออ้างอิง — ถ้าต้องใช้ `mv _archive/<file> ..` กลับได้ทันที (ไม่ได้ลบ)

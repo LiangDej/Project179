@@ -230,11 +230,11 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 
 ### VDOT & Performance
 
-**`vdot_estimator.py`** — ประเมิน VDOT จาก training
+**`race_predictor.py`** — ประเมิน VDOT จาก training (training estimate + breakthrough sessions — รวม vdot_estimator เข้ามาแล้วตั้งแต่ v1.7)
 
 | พูดว่า | ได้ |
 |---|---|
-| "VDOT ผมตอนนี้เท่าไหร่?" | training-based VDOT estimate จาก quality sessions 8 สัปดาห์ + disclaimer ว่าต้องยืนยันจากแข่งจริง |
+| "VDOT ผมตอนนี้เท่าไหร่?" | training estimate ตัวเดียว (HR-vs-T-zone) + รายการ breakthrough session + disclaimer ว่าต้องยืนยันจากแข่งจริง |
 | "พัฒนาขึ้นไหม 3 เดือนที่ผ่านมา?" | VDOT trend + session HR drift ตลอด 3 เดือน |
 
 ---

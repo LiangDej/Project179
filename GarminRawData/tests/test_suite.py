@@ -564,6 +564,23 @@ def plausibility_tests():
     check("plausibility: factor needed at current VDOT is between 1.0 and current factor",
           1.0 <= r_fef["factor_needed_at_current_vdot"] < 1.17, str(r_fef))
 
+    # v1.7: ONE training-VDOT estimate in the project (vdot_estimator merged into
+    # race_predictor). Two tools answering "what's my VDOT" gave +1.1 vs −8.9.
+    _tools = Path(rp.__file__).parent
+    check("consistency: vdot_estimator.py stays merged (single training-VDOT source)",
+          not (_tools / "vdot_estimator.py").exists()
+          and not any("vdot_estimator" in p.read_text() for p in _tools.glob("*.sh")))
+    bts = rp.find_breakthroughs(rp.load_session_log(), weeks=520)
+    check("plausibility: breakthrough pace-VDOT within confirmed +1…+band (no artefacts)",
+          all(A["vdot"] + rp.BREAKTHROUGH_THRESHOLD <= b["pace_vdot"] <= A["vdot"] + rp.PLAUSIBLE_BAND
+              for b in bts), str(bts))
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        _res = rp._run(type("A", (), {"goal_hm": None, "goal_fm": 240, "json": True})())
+    check("functional: race_predictor --json carries estimate, confirmed VDOT, breakthroughs",
+          {"vdot_confirmed", "training_estimate", "breakthroughs", "goals"} <= set(_res)
+          and _res["vdot_confirmed"] == A["vdot"], str(list(_res)))
+
     rb = A["rhr"]
     d1, _ = db.readiness_decision(80, "balanced", "quality1", rhr=rb + 9, rhr_baseline=rb)
     d2, _ = db.readiness_decision(80, "balanced", "long", rhr=rb + 5, rhr_baseline=rb)
