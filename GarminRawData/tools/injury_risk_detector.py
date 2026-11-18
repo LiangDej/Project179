@@ -31,7 +31,6 @@ BASE_DIR  = Path(__file__).parent.parent
 TOOLS_DIR = Path(__file__).parent
 COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
 DATA_FILE = BASE_DIR / "running_activities_all.json"
-QUALITY_LOG = BASE_DIR / "QualitySessionLog" / "sessions.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
@@ -78,12 +77,9 @@ def _load_activities(lookback_days: int) -> list[dict]:
 
 def _load_quality_log(lookback_days: int) -> list[dict]:
     """Load session log สำหรับ GCT + Cadence + Decoupling data"""
-    if not QUALITY_LOG.exists():
-        return []
     try:
-        with open(QUALITY_LOG, encoding="utf-8") as f:
-            _raw = json.load(f)
-            sessions = _raw.get("sessions", []) if isinstance(_raw, dict) else _raw
+        from session_logger import load_quality_log   # single log (v1.7.1)
+        sessions = load_quality_log()
     except Exception:
         return []
     cutoff = date.today() - timedelta(days=lookback_days)

@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.7-blue)
+![Version](https://img.shields.io/badge/version-1.7.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -299,7 +299,7 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 | Say | You get |
 |---|---|
-| "Plan my FM race nutrition for 27°C" | Gel + electrolyte schedule per km, total Na mg, % of ACSM ceiling |
+| "Plan my FM race nutrition for 27°C" | Dosing table from your own rule (`race_day_nutrition.in_race_schedule` in athlete.json, e.g. 1 cap every 4 km, 1 gel every 6 km) + total Na / % ACSM + carbs g/hr — no rule → split across water stations (`--mode stations`) |
 | "Pre-run 72kg post-run 70.5kg, drank 500ml — calculate my sweat rate" | Sweat rate L/hr + calibrated Na replacement for race plan |
 
 ---
@@ -406,7 +406,6 @@ No need to memorize these — the agent explains them every time it uses them. J
 | `treadmill_pace_model.py` | HR→pace interpolation for treadmill sessions |
 | `bangkok_climate.py` | Monthly morning temperature by city |
 | `garmin_workout_pusher.py` | Push workout plan to Garmin Connect device |
-| `tm_patch.py` | Fix session type/pace errors in sessions_master.json |
 
 ---
 
@@ -419,7 +418,7 @@ No need to memorize these — the agent explains them every time it uses them. J
 ```
 
 **Protected files** (a convention for AI coding assistants during a live coaching session — see [CLAUDE.md](CLAUDE.md); human contributors should just open a PR normally):
-- `GarminRawData/tools/*.py` (all 35 tools)
+- `GarminRawData/tools/*.py` (all 31 tools)
 - `skills/garmin_coach_mcp/config.py` + `db_helper.py`
 
 CI runs automatically on every push and pull request via GitHub Actions.

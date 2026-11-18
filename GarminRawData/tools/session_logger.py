@@ -80,7 +80,184 @@ def _load_activities() -> list:
 
 
 def _is_logged(activity_id: int, master: dict) -> bool:
-    return any(s.get("activity_id") == activity_id for s in master.get("sessions", []))
+    # A "_stub" record only carries post-run analysis (lap log was skipped or
+    # failed) — it must not block the real lap-level log later.
+    return any(s.get("activity_id") == activity_id and not s.get("_stub")
+               for s in master.get("sessions", []))
+
+
+def _insert_record(master: dict, record: dict) -> None:
+    """Append a lap-level record, replacing any stub for the same activity
+    and carrying its `analysis` block over. Keeps activity_id-desc order."""
+    aid = record.get("activity_id")
+    sessions = master.setdefault("sessions", [])
+    for old in [x for x in sessions if x.get("activity_id") == aid]:
+        if old.get("analysis") and not record.get("analysis"):
+            record["analysis"] = old["analysis"]
+    master["sessions"] = [x for x in sessions if x.get("activity_id") != aid] + [record]
+    # Sort by activity_id (monotonic with time) not date-string — a
+    # non-ISO "date" value (e.g. "custom") would otherwise sort above
+    # every real date and pin a stale session at index 0 permanently.
+    master["sessions"].sort(key=lambda x: x.get("activity_id", 0), reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Single quality log (v1.7.1)
+# Until v1.7.1 post_session_analyzer wrote a SECOND file, sessions.json, and
+# tm_patch.py had to copy type / treadmill / pace corrections across after
+# every run — any skipped step left the two logs disagreeing (one quality
+# session was in one file only). Now the analyzer's grading fields live in
+# the master record under "analysis", and load_quality_log() rebuilds the
+# old sessions.json-shaped rows on read, with the treadmill-pace correction
+# applied there (formerly tm_patch).
+# ---------------------------------------------------------------------------
+DISPLAY_TYPE = {            # master type → analyzer display type
+    "threshold":   "Threshold (T)",
+    "interval":    "Interval (I)",
+    "tempo":       "Tempo",
+    "fast_finish": "Fast Finish",
+    "easy":        "Easy Run",
+    "long_run":    "Easy Run",
+}
+MASTER_TYPE = {             # analyzer display type → master type
+    "Threshold (T)":  "threshold",
+    "Interval (I)":   "interval",
+    "Repetition (R)": "interval",
+    "Tempo":          "tempo",
+    "Marathon Pace":  "tempo",
+    "Fast Finish":    "fast_finish",
+    "Easy Run":       "easy",
+}
+ANALYSIS_KEYS = ("session_type", "pace", "avg_hr", "max_hr", "cadence", "power", "gct",
+                 "vr", "stride", "decoupling", "zone_pct", "grade", "logged_at",
+                 "total_km_actual", "quality_pct", "pace_source", "pace_gps_orig")
+
+
+def save_analysis(entry: dict) -> bool:
+    """Store post_session_analyzer's graded result on the master record.
+
+    Returns False if this activity already has an analysis (no overwrite).
+    Creates a stub master record if the lap-level log doesn't exist yet.
+    """
+    master = _load_master()
+    aid = entry.get("activity_id")
+    rec = next((x for x in master.get("sessions", []) if x.get("activity_id") == aid), None)
+    if rec is not None and rec.get("analysis"):
+        return False
+    analysis = {k: entry[k] for k in ANALYSIS_KEYS if k in entry}
+    if rec is None:
+        rec = {
+            "date":         entry.get("date"),
+            "activity_id":  aid,
+            "session_type": MASTER_TYPE.get(entry.get("session_type"), "easy"),
+            "is_treadmill": entry.get("is_treadmill", False),
+            "avg_hr":       entry.get("avg_hr"),
+            "max_hr":       entry.get("max_hr"),
+            "laps":         None,
+            "treadmill_phases": entry.get("treadmill_phases"),
+            "bb_start":     entry.get("bb_start"),
+            "bb_end":       entry.get("bb_end"),
+            "stam_start":   entry.get("stam_start"),
+            "stam_end":     entry.get("stam_end"),
+            "_stub":        True,
+        }
+        master.setdefault("sessions", []).append(rec)
+        master["sessions"].sort(key=lambda x: x.get("activity_id", 0), reverse=True)
+    elif entry.get("treadmill_phases") and not rec.get("treadmill_phases"):
+        rec["treadmill_phases"] = entry["treadmill_phases"]
+    rec["analysis"] = analysis
+    _save_master(master)
+    return True
+
+
+def _tm_pace_from_belt(rec: dict) -> str | None:
+    """Quality pace from treadmill belt speed (most accurate for TM).
+
+    Quality phases = within 0.5 km/h of the session's peak speed and ≥0.3 km
+    (handles 5×1 km reps and continuous T equally). Distance-weighted.
+    """
+    phases = rec.get("treadmill_phases") or []
+    speeds = [ph.get("speed_kmh", 0) for ph in phases if ph.get("speed_kmh")]
+    if not speeds:
+        return None
+    peak = max(speeds)
+    q = [ph for ph in phases
+         if abs(ph.get("speed_kmh", 0) - peak) <= 0.5 and (ph.get("distance_km") or 0) >= 0.3]
+    dist = sum(ph["distance_km"] for ph in q)
+    if not q or dist < 0.5:
+        return None
+    sec = round(sum((3600 / ph["speed_kmh"]) * ph["distance_km"] for ph in q) / dist)
+    m, s_ = divmod(sec, 60)
+    return f"{m}:{s_:02d}/km"
+
+
+def _tm_pace_from_laps(rec: dict) -> str | None:
+    """Fallback: duration-weighted HR-inferred pace over quality laps."""
+    total_s = weighted = 0.0
+    for lap in rec.get("laps") or []:
+        if lap.get("role") != "quality" or not lap.get("avg_hr"):
+            continue
+        ps = _tm_pace_from_hr(lap["avg_hr"])
+        if not ps or ":" not in ps:
+            continue
+        m, s_raw = ps.split(":")
+        sec = int(m) * 60 + int(s_raw.replace("/km", "").strip())
+        dur = lap.get("duration_s") or 0
+        weighted += sec * dur
+        total_s += dur
+    if not total_s:
+        return None
+    m, s_ = divmod(int(weighted / total_s), 60)
+    return f"{m}:{s_:02d}/km"
+
+
+def load_quality_log() -> list[dict]:
+    """Analyzed sessions in the legacy sessions.json row shape, newest first.
+
+    Master record is canonical for type / treadmill / BB / stamina; the
+    analysis block supplies grading fields. Treadmill pace is corrected here:
+    belt speed > HR-inferred quality laps > HR-inferred session avg.
+    """
+    out = []
+    for rec in _load_master().get("sessions", []):
+        a = rec.get("analysis")
+        if not a:
+            continue
+        row = {
+            "date":         rec.get("date"),
+            "activity_id":  rec.get("activity_id"),
+            "session_type": DISPLAY_TYPE.get(rec.get("session_type"), a.get("session_type")),
+            "is_treadmill": bool(rec.get("is_treadmill")),
+            "pace":         a.get("pace"),
+        }
+        for k in ("avg_hr", "max_hr", "cadence", "power", "gct", "vr", "stride",
+                  "decoupling", "zone_pct"):
+            row[k] = a.get(k)
+        for k in ("stam_start", "stam_end"):
+            row[k] = rec.get(k) if rec.get(k) is not None else a.get(k)
+        # BB: once the master has a bb_source (run-window value, or the
+        # explicit "unavailable"), never fall back to the analysis copy —
+        # that holds the old day-peak / sync-time numbers.
+        for k in ("bb_start", "bb_end"):
+            row[k] = rec.get(k) if (rec.get("bb_source") or rec.get(k) is not None) else a.get(k)
+        if rec.get("bb_source"):
+            row["bb_source"] = rec["bb_source"]
+        row["grade"] = a.get("grade")
+        row["logged_at"] = a.get("logged_at")
+        for k in ("quality_hr_avg", "stamina_drain_pct", "treadmill_phases", "total_km"):
+            if rec.get(k) is not None:
+                row[k] = rec[k]
+        for k in ("total_km_actual", "quality_pct", "pace_gps_orig"):
+            if a.get(k) is not None:
+                row[k] = a[k]
+        if row["is_treadmill"]:
+            belt = _tm_pace_from_belt(rec)
+            fixed = belt or _tm_pace_from_laps(rec) or _tm_pace_from_hr(row.get("avg_hr"))
+            if fixed:
+                row["pace"] = fixed
+                row["pace_source"] = "belt_speed" if belt else "hr_inferred"
+        out.append(row)
+    return out
 
 
 def _fmt_pace(sec_km) -> str:
@@ -441,11 +618,7 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
         if not record.get("date") or not record.get("activity_id") or not record.get("total_km"):
             print(f"⚠️  auto_log: missing required fields (date/activity_id/total_km) — skip")
             return
-        master.setdefault("sessions", []).append(record)
-        # Sort by activity_id (monotonic with time) not date-string — a
-        # non-ISO "date" value (e.g. "custom") would otherwise sort above
-        # every real date and pin a stale session at index 0 permanently.
-        master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
+        _insert_record(master, record)
         _save_master(master)
         print(f"✅ Auto-logged (easy) → sessions_master.json | {record['total_km']}km")
     else:
@@ -499,11 +672,7 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
                                interactive=not non_interactive,
                                treadmill_phases=treadmill_phases,
                                date_str_fallback=date_str)
-        master.setdefault("sessions", []).append(record)
-        # Sort by activity_id (monotonic with time) not date-string — a
-        # non-ISO "date" value (e.g. "custom") would otherwise sort above
-        # every real date and pin a stale session at index 0 permanently.
-        master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
+        _insert_record(master, record)
         _save_master(master)
         q_count = len([l for l in record["laps"] if l.get("role") == "quality"])
         print(f"✅ Logged → sessions_master.json | {session_type} | quality laps: {q_count}")
@@ -560,7 +729,7 @@ def batch_import_easy(since_date: str | None = None):
             health    = get_health_cached(client, dt_str)
             record    = _build_record(a, laps_data, health,
                                       session_type="easy", interactive=False)
-            master.setdefault("sessions", []).append(record)
+            _insert_record(master, record)
             imported += 1
             print("✅")
         except Exception as e:
@@ -756,8 +925,7 @@ def main():
                            interactive=(session_type != "easy"),
                            treadmill_phases=treadmill_phases)
 
-    master.setdefault("sessions", []).append(record)
-    master["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
+    _insert_record(master, record)
     _save_master(master)
 
     q_count = len([l for l in record["laps"] if l.get("role") == "quality"])

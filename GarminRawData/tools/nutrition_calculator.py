@@ -33,9 +33,13 @@ try:
     from config import NUTRITION as _NUT
     PREVO_NA_MG   = _NUT["prevo_na_mg"]      # Prevo Caps EVO (Trisodium Citrate)
     AMINOVITAL_NA = _NUT["aminovital_na_mg"]  # Amino Vital Shot
+    GEL_CARB_G    = _NUT.get("aminovital_carb_g", 26)
+    IN_RACE_SCHEDULE = _NUT.get("in_race_schedule")
 except Exception:
     PREVO_NA_MG   = 650
     AMINOVITAL_NA = 90
+    GEL_CARB_G    = 26
+    IN_RACE_SCHEDULE = None
 
 # SINGLE SOURCE: races.json via race_registry (no hardcoded Fuji/stations).
 def _build_race_config() -> dict:
@@ -162,6 +166,111 @@ def plan_caps(na_loss_mg: float, na_min: float, na_max: float,
     }
 
 
+def schedule_plan(dist_km: float, na_loss_mg: float, sched: dict) -> dict:
+    """Fixed-interval plan from the athlete's own dosing rule (v1.7.1).
+
+    The station solver above bundles every cap into the water stops (2–3
+    Prevo at once at km 6/12/18) — that contradicts the athlete's rule of ONE
+    Prevo every 4 km + one gel every 6 km, which is what actually worked in
+    training. Here the rule is the plan; the tool only places the doses,
+    sums the sodium/carbs, and VERIFIES the total against ACSM 40–80%.
+    """
+    p_every = sched.get("prevo_every_km") or 4
+    g_every = sched.get("gel_every_km") or 6
+    max_per = sched.get("max_prevo_per_stop", 1)
+    skip    = sched.get("skip_last_km", 2)
+    last_ok = dist_km - skip
+
+    def marks(every):
+        out, k = [], every
+        while k <= last_ok + 1e-9:
+            out.append(k)
+            k += every
+        return out
+
+    prevo_km, gel_km = marks(p_every), marks(g_every)
+    stops = []
+    for km in sorted(set(prevo_km) | set(gel_km)):
+        stops.append({"km": km,
+                      "prevo": min(max_per, 1) if km in prevo_km else 0,
+                      "gel": 1 if km in gel_km else 0})
+    pre_prevo = sched.get("pre_prevo", 0)
+    pre_gel   = sched.get("pre_gel", 0)
+    n_prevo   = pre_prevo + sum(x["prevo"] for x in stops)
+    n_gel     = pre_gel + sum(x["gel"] for x in stops)
+    plan_na   = n_prevo * PREVO_NA_MG + n_gel * AMINOVITAL_NA
+    return {
+        "stops":       stops,
+        "pre_prevo":   pre_prevo,
+        "pre_gel":     pre_gel,
+        "n_prevo":     n_prevo,
+        "n_gel":       n_gel,
+        "in_race_gels": sum(x["gel"] for x in stops),
+        "max_prevo_at_once": max([x["prevo"] for x in stops] + [pre_prevo]),
+        "plan_na":     plan_na,
+        "replace_pct": round(plan_na / na_loss_mg * 100, 1) if na_loss_mg else 0,
+    }
+
+
+def build_schedule_plan(race_key: str, temp_c: float, humidity_pct: float,
+                        duration_min: float, sched: dict) -> dict:
+    rc = RACE_CONFIG[race_key]
+    sr, sr_low, sr_high = sweat_rate_lhr(temp_c, humidity_pct)
+    total_sweat_l       = sr * duration_min / 60
+    na_loss_mg          = total_sweat_l * sweat_na_mgl()
+    na_min, na_max      = na_requirement(sr, duration_min)
+    p = schedule_plan(rc["dist_km"], na_loss_mg, sched)
+
+    print("=" * 60)
+    print(f"💊 NUTRITION CALCULATOR — {rc['name']}  (โหมด: กฎของนักวิ่ง)")
+    print(f"   {date.today()}  |  {temp_c}°C / {humidity_pct}%RH  |  Est. {duration_min:.0f} min")
+    print("=" * 60)
+    print(f"💦 Sweat: {sr} L/hr (range {sr_low}–{sr_high}) → {round(total_sweat_l, 1)} L, "
+          f"Na loss {round(na_loss_mg)} mg")
+    print(f"🎯 ACSM 40–80%: {na_min}–{na_max} mg")
+    print()
+    print(f"📋 กฎ: Prevo 1 เม็ดทุก {sched.get('prevo_every_km')} km + เจล 1 ซองทุก "
+          f"{sched.get('gel_every_km')} km  (ไม่กิน Prevo พร้อมกันเกิน "
+          f"{sched.get('max_prevo_per_stop', 1)} เม็ด, งด {sched.get('skip_last_km', 2)} km สุดท้าย)")
+    pre = []
+    if p["pre_gel"]:
+        pre.append(f"เจล {p['pre_gel']}")
+    if p["pre_prevo"]:
+        pre.append(f"Prevo {p['pre_prevo']}")
+    print(f"   T-30min : {' + '.join(pre) if pre else '—'}")
+    print(f"   {'km':<6} {'Prevo':>6} {'Gel':>5} {'Na':>7}")
+    print("   " + "-" * 28)
+    for x in p["stops"]:
+        na = x["prevo"] * PREVO_NA_MG + x["gel"] * AMINOVITAL_NA
+        print(f"   {x['km']:<6g} {(str(x['prevo']) if x['prevo'] else '—'):>6} "
+              f"{(str(x['gel']) if x['gel'] else '—'):>5} {na:>5} mg")
+    print()
+    hrs = duration_min / 60
+    carb_hr = round(p["in_race_gels"] * GEL_CARB_G / hrs) if hrs else 0
+    print(f"   รวม: Prevo {p['n_prevo']} + เจล {p['n_gel']} = {p['plan_na']} mg Na "
+          f"= {p['replace_pct']}% of loss")
+    print(f"   คาร์บระหว่างวิ่ง: {p['in_race_gels']} ซอง × {GEL_CARB_G} g ≈ {carb_hr} g/hr")
+    print()
+    print("📊 Verdict:")
+    if p["replace_pct"] < 40:
+        ok_short = duration_min <= 120
+        print(f"   🟡 {p['replace_pct']}% — ต่ำกว่า 40% ACSM. "
+              + ("ใช้เวลา ≤2 ชม. รับได้ถ้าไม่ใช่ salty sweater"
+                 if ok_short else f"เกิน 2 ชม. ({duration_min:.0f} min) — ขาด Na สะสมมากขึ้น")
+              + f" — ถ้าเคยตะคริว/เหงื่อเป็นคราบขาว ลดช่วง Prevo เป็นทุก 3 km (ยังทีละ 1 เม็ด)")
+    elif p["replace_pct"] > 80:
+        print(f"   ⚠️  {p['replace_pct']}% — เกิน 80%: ยืดช่วง Prevo ออก (เสี่ยง GI)")
+    else:
+        print(f"   ✅ {p['replace_pct']}% — อยู่ใน ACSM zone (40–80%)")
+    if p["max_prevo_at_once"] > 1:
+        print(f"   ⚠️  มีจุดที่ Prevo >1 เม็ดพร้อมกัน — ขัดกฎ")
+    print("   💧 น้ำเปล่าเป็นหลัก ดื่มตามกระหาย (hyponatremia มาจากดื่มน้ำเกิน ไม่ใช่ Na)")
+    print("=" * 60)
+    p.update({"sweat_lhr": sr, "na_loss_mg": round(na_loss_mg),
+              "na_min": na_min, "na_max": na_max, "carb_g_hr": carb_hr})
+    return p
+
+
 def build_plan(race_key: str, temp_c: float, humidity_pct: float,
                dew_c: float, duration_min: float,
                prevo_pre=None) -> None:
@@ -249,6 +358,9 @@ def main():
     parser.add_argument("--dew",        type=float, default=21.0)
     parser.add_argument("--duration",   type=float, default=None,
                         help="Estimated race duration (min) — defaults to race preset")
+    parser.add_argument("--mode", choices=["auto", "schedule", "stations"], default="auto",
+                        help="schedule = กฎของนักวิ่ง (athlete.json in_race_schedule); "
+                             "stations = solver แบ่งเม็ดตามจุดน้ำ; auto = schedule ถ้ามีกฎ")
     parser.add_argument("--prevo-pre",  type=int,   default=None,
                         help="Force pre-race Prevo caps (default: auto — solver picks)")
     # Calibration mode
@@ -269,7 +381,16 @@ def main():
         return
 
     duration = args.duration or RACE_CONFIG[args.race]["default_duration_min"]
-    build_plan(args.race, args.temp, args.humidity, args.dew, duration, args.prevo_pre)
+    mode = args.mode
+    if mode == "auto":
+        mode = "schedule" if IN_RACE_SCHEDULE else "stations"
+    if mode == "schedule":
+        if not IN_RACE_SCHEDULE:
+            print("❌ ไม่มี race_day_nutrition.in_race_schedule ใน athlete.json — ใช้ --mode stations")
+            sys.exit(1)
+        build_schedule_plan(args.race, args.temp, args.humidity, duration, IN_RACE_SCHEDULE)
+    else:
+        build_plan(args.race, args.temp, args.humidity, args.dew, duration, args.prevo_pre)
 
 
 if __name__ == "__main__":

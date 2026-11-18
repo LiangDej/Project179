@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # run_post_quality.sh — เรียกหลังวิ่ง Quality (T / I / Tempo / Fast Finish)
-# วิเคราะห์ + log sessions.json + sessions_master.json + VDOT + skill sync
+# วิเคราะห์ + log sessions_master.json (single log, v1.7.1) + VDOT + skill sync
 set -euo pipefail
 
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -17,7 +17,7 @@ echo "▶ Step 0/3 — Sync Activities + Wellness"
 "$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_incremental.py" --lookback-days 3
 "$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_wellness.py"
 
-# ── Step 1: Post-session analysis + log sessions.json ──────────────────────
+# ── Step 1: Post-session analysis + log sessions_master.json ───────────────
 echo ""
 echo "▶ Step 1/3 — Post Session Analyzer"
 echo "────────────────────────────────────"
@@ -35,11 +35,8 @@ else
   printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest --update-log
 fi
 
-# ── Step 1.5: Patch TM pace in sessions.json ───────────────────────────────
-echo ""
-echo "▶ Step 1.5/3 — TM Pace Correction"
-echo "────────────────────────────────────"
-"$(bash "$TOOLS_DIR/get_python.sh")" tm_patch.py
+# (v1.7.1) tm_patch removed — single log; treadmill pace (belt > HR-inferred)
+# is applied on read by session_logger.load_quality_log().
 
 # ── Step 2: VDOT trend ──────────────────────────────────────────────────────
 echo ""
@@ -52,11 +49,11 @@ echo "────────────────────────�
 
 # ── Step 4: Sync skill file ─────────────────────────────────────────────────
 echo ""
-echo "▶ Step 4/4 — Skill Sync"
+echo "▶ Step 3/3 — Skill Sync"
 echo "────────────────────────────────────"
 "$(bash "$TOOLS_DIR/get_python.sh")" skill_sync.py
 
 echo ""
 echo "════════════════════════════════════════"
-echo "✅ Done — sessions.json + sessions_master.json + stamina + skill file updated"
+echo "✅ Done — sessions_master.json + skill file updated"
 echo "════════════════════════════════════════"

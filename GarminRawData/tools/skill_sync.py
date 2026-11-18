@@ -2,7 +2,7 @@
 """
 skill_sync.py — Auto-update garmin-coach-analyzer.md จาก session log
 
-อ่าน QualitySessionLog/sessions.json แล้ว:
+อ่าน quality log (session_logger.load_quality_log — sessions_master.json) แล้ว:
   1. Append row ใหม่เข้า Raw Session Data table ใน skill file
   2. อัพเดต timestamp "อัพเดตล่าสุด" ใน Quality Run Analysis section
 
@@ -19,7 +19,6 @@ from pathlib import Path
 from datetime import datetime
 
 BASE_DIR   = Path(__file__).parent.parent
-LOG_PATH   = BASE_DIR / "QualitySessionLog" / "sessions.json"
 # Personal session table lives in a GITIGNORED file, not the public skill file
 # (2026-11-17: 23 rows of real training data had leaked into the committed
 # skills/garmin-coach-analyzer.md). The skill file points the agent here.
@@ -36,11 +35,14 @@ TABLE_SEP    = "|---|---|---|---|---|---|---|---|---|---|"
 
 
 def load_log():
-    if not LOG_PATH.exists():
-        print("⚠️  ไม่พบ sessions.json — รัน post_session_analyzer.py --update-log ก่อน")
+    # Single log since v1.7.1: analysed sessions live in sessions_master.json
+    sys.path.insert(0, str(Path(__file__).parent))
+    from session_logger import load_quality_log
+    sessions = load_quality_log()
+    if not sessions:
+        print("⚠️  ไม่มี session ที่วิเคราะห์แล้ว — รัน post_session_analyzer.py --update-log ก่อน")
         sys.exit(1)
-    with open(LOG_PATH) as f:
-        return json.load(f)
+    return {"sessions": sessions}
 
 
 def load_skill():

@@ -18,8 +18,8 @@ skills/garmin_coach_mcp/config.py
 skills/garmin_coach_mcp/db_helper.py
 ```
 
-**Rule of thumb: EVERY `*.py` in `GarminRawData/tools/` is protected — current (32) + any added later.**
-Full enumeration (32):
+**Rule of thumb: EVERY `*.py` in `GarminRawData/tools/` is protected — current (31) + any added later.**
+Full enumeration (31):
 
 ```
 GarminRawData/tools/daily_brief.py
@@ -44,7 +44,6 @@ GarminRawData/tools/sleep_correlator.py
 GarminRawData/tools/detect_session.py
 GarminRawData/tools/vdot_math.py
 GarminRawData/tools/treadmill_pace_model.py
-GarminRawData/tools/tm_patch.py
 GarminRawData/tools/skill_sync.py
 GarminRawData/tools/post_race_updater.py
 GarminRawData/tools/garmin_workout_pusher.py
@@ -70,7 +69,7 @@ skills/garmin_coach_mcp/db_helper.py
 
 **If asked to run, test, or analyze output from any of these tools → run them via bash, do NOT edit the source.**
 
-**If you believe one of the protected files above (the 32 tools, `config.py`, or `db_helper.py`) needs updating → STOP and tell the user what change you'd like to make, then wait for explicit approval.**
+**If you believe one of the protected files above (the 31 tools, `config.py`, or `db_helper.py`) needs updating → STOP and tell the user what change you'd like to make, then wait for explicit approval.**
 
 **⚠️ This approval requirement applies ONLY to the protected files listed above. It does NOT apply to `athlete.json`, `races.json`, or any other data file — those are meant to be edited freely, with no confirmation needed.** This matters most during first-time setup: when a user runs the onboarding flow (copying `athlete.example.json`/`races.example.json` to `athlete.json`/`races.json` and filling in their values), just write the files directly — do not ask for permission first, and do not treat this as "modifying a protected file." That's the entire point of the single-source-of-truth design: `athlete.json`/`races.json` are plain data, not code, and editing them is the *normal, expected, everyday* way this project is configured.
 
@@ -89,7 +88,7 @@ PROJECT 179 — Garmin-connected Jack Daniels running coach agent.
 ## ✅ Test Suite — รันหลังแก้ tool/config/data ทุกครั้ง
 
 ```bash
-.venv/bin/python3.13 GarminRawData/tests/test_suite.py   # 140 checks, exit 0 = ผ่าน
+.venv/bin/python3.13 GarminRawData/tests/test_suite.py   # 161 checks, exit 0 = ผ่าน
 (cd GarminRawData/tools && ../../.venv/bin/python3.13 -m unittest tests.test_tools)   # 72 unit tests
 ```
 4 ชั้น: **PLAUSIBILITY** (output ต้องสมเหตุสมผลทางสรีรวิทยา ไม่ใช่แค่สูตรตรงกัน) + **UNIT** (สูตรแต่ละ tool) + **CONSISTENCY** (single-source invariants — รวม STATIC source-scan ที่จับ stale literal ทุก branch เช่น HR<155/170–176/VDOT38) + **FUNCTIONAL** (รัน flow จริง เทียบ output กับ config). จับ regression class: race-pace≠vdot_math, nutrition>80%, _classify_speed, ACWR, Fuji leak, Easy-ceiling≠config. แก้ค่าใน athlete.json/races.json แล้วรัน suite ต้องเขียวก่อนถือว่าเสร็จ.
@@ -142,8 +141,8 @@ cd GarminRawData/tools
 - `GarminRawData/athlete.json` — ⭐ SINGLE SOURCE: VDOT/LTHR/RHR/MHR/weight/paces/HR-zone%/nutrition (config.py reads this)
 - `GarminRawData/races.json` — ⭐ SINGLE SOURCE: race targets (race_registry.py reads this)
 - `GarminRawData/running_activities_all.json` — synced activity history (all runs)
-- `GarminRawData/QualitySessionLog/sessions.json` — quality session log (aggregate, used by race_predictor/skill_sync)
-- `GarminRawData/QualitySessionLog/sessions_master.json` — lap-level session log (48 sessions, easy laps=null, quality laps slimmed to 7 fields)
+- `GarminRawData/QualitySessionLog/sessions.json` — **retired v1.7.1** (merged into sessions_master; tools read `session_logger.load_quality_log()`)
+- `GarminRawData/QualitySessionLog/sessions_master.json` — ⭐ SINGLE session log: lap-level record + `analysis` block (grade/pace/form) per session; read via `session_logger.load_quality_log()`
 - `~/.config/garmin-coach/health_cache/` — daily health cache (2h TTL)
 - `~/.config/garmin-coach/lap_cache/` — lap data cache (7d TTL)
 - `~/.config/garmin-coach/.env` — Garmin credentials (never in Google Drive)

@@ -153,23 +153,20 @@ def main():
     print(f"\n📊 VOLUME (last 4 weeks)")
     print(SEP)
     try:
-        from activity_loader import load_activities_merged
-        acts_all  = load_activities_merged()   # file + live overlay (กัน stale)
-        by_week: dict[str, float] = {}
-        for a in acts_all:
-            dist_km = (a.get("distance") or 0) / 1000
-            ts = a.get("startTimeLocal", "")[:10]
-            if ts:
-                d  = date.fromisoformat(ts)
-                ws = str(d - timedelta(days=d.weekday()))
-                by_week[ws] = by_week.get(ws, 0) + dist_km
-
-        recent_weeks = sorted(by_week.keys())[-4:]
-        for ws in recent_weeks:
-            bar_len = int(by_week[ws] / 3)
-            bar     = "█" * bar_len
-            current = "◄ current" if ws == str(today - timedelta(days=today.weekday())) else ""
-            print(f"   {ws}  {by_week[ws]:>5.1f} km  {bar} {current}")
+        # v1.7.1: ONE weekly-volume calculation — reuse weekly_load_report's
+        # analyze_week (same loader, same week bounds). The old local
+        # aggregation listed only weeks that HAD runs, so an injury week
+        # with 0 km silently vanished and "last 4 weeks" spanned 6+ weeks.
+        from weekly_load_report import load_activities as _wlr_load, analyze_week
+        acts_all = _wlr_load()
+        this_mon = today - timedelta(days=today.weekday())
+        for w in range(3, -1, -1):
+            mon = this_mon - timedelta(weeks=w)
+            wd  = analyze_week(acts_all, str(mon), str(mon + timedelta(days=6)))
+            km  = wd["total_km"]
+            bar = "█" * int(km / 3)
+            current = "◄ current" if w == 0 else ""
+            print(f"   {mon}  {km:>5.1f} km  {bar} {current}")
     except Exception as e:
         print(f"   ⚠️  Volume error: {e}")
 

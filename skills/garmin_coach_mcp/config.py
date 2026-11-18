@@ -105,6 +105,10 @@ _NP = _AJ.get("nutrition_products", {"prevo_na_mg": 650, "aminovital_na_mg": 90}
 NUTRITION = {
     "prevo_na_mg":      _NP.get("prevo_na_mg", 650),
     "aminovital_na_mg": _NP.get("aminovital_na_mg", 90),
+    "aminovital_carb_g": _NP.get("aminovital_carb_g", 26),
+    # Athlete's fixed in-race dosing rule (athlete.json → race_day_nutrition.
+    # in_race_schedule). None = fall back to the per-station solver.
+    "in_race_schedule": _AJ.get("race_day_nutrition", {}).get("in_race_schedule"),
 }
 
 # ---------------------------------------------------------------------------

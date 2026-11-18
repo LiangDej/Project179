@@ -32,7 +32,6 @@ except ImportError:
 from config import ATHLETE, ZONE_PCT, HR_ZONE_BOUNDS  # noqa: E402
 from training_load import calc_hr_tss  # noqa: E402  — single source of truth for TSS
 
-QUALITY_LOG  = BASE_DIR / "QualitySessionLog" / "sessions.json"
 HEALTH_CACHE = BASE_DIR / "wellness"
 
 
@@ -43,13 +42,10 @@ def load_activities():
 
 
 def load_quality_map() -> dict:
-    """คืน dict {date_str: zone} จาก sessions.json เพื่อ override HR classification"""
-    if not QUALITY_LOG.exists():
-        return {}
+    """คืน dict {date_str: zone} จาก quality log เพื่อ override HR classification"""
     try:
-        with open(QUALITY_LOG) as f:
-            raw = json.load(f)
-        sessions = raw.get("sessions", []) if isinstance(raw, dict) else raw
+        from session_logger import load_quality_log   # single log (v1.7.1)
+        sessions = load_quality_log()
         result = {}
         for s in sessions:
             if not isinstance(s, dict):
@@ -199,6 +195,9 @@ def main():
         total = wd['total_km']
         z = wd['zones']
         z_dist = ""
+        # Percent of the UNROUNDED zone sum — dividing raw zone km by the
+        # 0.1-rounded total printed "E:101%" for a 2.53 km week (v1.7.1 fix).
+        total = sum(z.values())
         if total > 0:
             z_dist = f"E:{round(z['E']/total*100)}% M:{round(z['M']/total*100)}% T:{round(z['T']/total*100)}% I:{round(z['I']/total*100)}%"
 

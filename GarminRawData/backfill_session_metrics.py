@@ -63,7 +63,14 @@ def main():
                 msg.append(f"BB {s.get('bb_start')}->{s.get('bb_end')} => {bb['bb_start']}->{bb['bb_end']} [{bb['bb_source']}]")
                 s.update(bb)
             else:
-                skipped.append((s.get("date"), aid, "no reliable BB for run window"))
+                # v1.7.1: Garmin no longer has the run-window timeline for
+                # these. Clear the old day-peak/sync-time numbers (e.g. 69→5)
+                # so no tool reads them as a run drain, and mark it so the
+                # backfill stops retrying.
+                if s.get("bb_source") != "unavailable":
+                    msg.append(f"BB {s.get('bb_start')}->{s.get('bb_end')} => unavailable")
+                    s.update({"bb_start": None, "bb_end": None, "bb_source": "unavailable"})
+                skipped.append((s.get("date"), aid, "no reliable BB for run window → marked unavailable"))
         if need_st:
             st0, st1 = sl.stamina_from_details(details)
             if st0 is not None:

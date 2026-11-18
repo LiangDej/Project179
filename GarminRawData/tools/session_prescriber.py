@@ -47,10 +47,42 @@ except ImportError:
 # SINGLE SOURCE: races.json via race_registry (active races only).
 try:
     from race_registry import list_races
-    RACE_DATES = [{"name": r["name"], "date": date.fromisoformat(r["date"])}
-                  for _, r in list_races(active_only=True)]
+    RACE_DATES = [{"name": r["name"], "date": date.fromisoformat(r["date"]),
+                   "tier": r.get("tier", "A"), "taper_days": r.get("taper_days")}
+                  for _, r in list_races(active_only=True)
+                  if r.get("tier") != "template"]
 except Exception:
-    RACE_DATES = [{"name": "🏁 Bangsaen42 Chonburi Marathon", "date": date(2026, 11, 15)}]
+    RACE_DATES = [{"name": "🏁 Bangsaen42 Chonburi Marathon", "date": date(2026, 11, 15),
+                   "tier": "A", "taper_days": None}]
+
+# ---------------------------------------------------------------------------
+# Taper profiles by race tier (v1.7.1)
+# Before v1.7.1 EVERY race got the A-race taper (14-day window, no quality
+# ≤10 d, long ≤12 km) — a B tune-up or C race wiped out two weeks of quality.
+# Mujika & Padilla 2003: full taper 8–14 d for goal races; tune-ups use a
+# short mini-taper so the main build isn't interrupted.
+#   window      days before race where taper rules start
+#   no_quality  quality sessions become easy at ≤ this many days
+#   race_week   ≤ this many days = "Race Week" (bigger volume cut)
+#   long_cap    max long-run km inside the window
+# Per-race override: races.json → "taper_days" replaces `window`.
+# ---------------------------------------------------------------------------
+TAPER_PROFILES = {
+    "A": {"window": 14, "no_quality": 10, "race_week": 7, "long_cap": 12,
+          "vol_early": "30%", "vol_race": "50%"},
+    "B": {"window": 7,  "no_quality": 3,  "race_week": 3, "long_cap": 14,
+          "vol_early": "20%", "vol_race": "40%"},
+    "C": {"window": 3,  "no_quality": 2,  "race_week": 2, "long_cap": 10,
+          "vol_early": "0%",  "vol_race": "20%"},
+}
+
+
+def taper_profile(race: dict) -> dict:
+    """Taper rules for a race entry (tier-based, optional taper_days override)."""
+    prof = dict(TAPER_PROFILES.get(race.get("tier") or "A", TAPER_PROFILES["A"]))
+    if race.get("taper_days"):
+        prof["window"] = int(race["taper_days"])
+    return prof
 
 # Hard constraints
 WEEKLY_STRUCTURE = {
@@ -148,6 +180,26 @@ def _days_to_nearest_race(from_date: date) -> tuple[str | None, int | None]:
     return name, days
 
 
+def _active_taper(on_date: date) -> tuple[str | None, int | None, dict | None]:
+    """Nearest race whose OWN tier window covers on_date → (name, days, profile).
+
+    A C-race 5 days out is outside its 3-day window, so it does not taper the
+    day; an A-race 12 days out is inside its 14-day window, so it does.
+    """
+    live = []
+    for r in RACE_DATES:
+        days = (r["date"] - on_date).days
+        if days < 0:
+            continue
+        prof = taper_profile(r)
+        if days <= prof["window"]:
+            live.append((days, r["name"], prof))
+    if not live:
+        return None, None, None
+    days, name, prof = min(live, key=lambda x: x[0])
+    return name, days, prof
+
+
 def _get_health_from_cache() -> dict:
     try:
         from garmin_client import _load_health_cache
@@ -165,8 +217,12 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
                    taper_days: int | None, taper_name: str | None,
                    target_date: date,
                    long_km_override: int | None = None,
-                   easy_km_override: int | None = None) -> dict:
+                   easy_km_override: int | None = None,
+                   taper_prof: dict | None = None) -> dict:
     """สร้าง prescription สำหรับ 1 วัน"""
+    tp = taper_prof or TAPER_PROFILES["A"]
+    in_taper = taper_days is not None and taper_days <= tp["window"]
+    no_quality = in_taper and taper_days <= tp["no_quality"]
 
     prescription = PHASE_PRESCRIPTIONS.get(phase_key, PHASE_PRESCRIPTIONS["quality"])
     ep_lo = _fmt_pace(VDOT_PACES["E"][0])
@@ -184,8 +240,8 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
             decision = "MODIFY"
             override_type = "mobility_only"
     elif day_type in ("quality1", "quality2"):
-        # Taper: no quality ≤10 days
-        if taper_days is not None and taper_days <= 10:
+        # Taper: no quality inside the tier's no-quality window
+        if no_quality:
             decision = "MODIFY"
             override_type = "easy"
         elif hrv.lower() == "unbalanced":
@@ -230,7 +286,7 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
 
     elif day_type in ("quality1", "quality2") and override_type == "easy":
         reason = ""
-        if taper_days is not None and taper_days <= 10:
+        if no_quality:
             reason = f"(Taper T-{taper_days})"
         elif hrv.lower() == "unbalanced":
             reason = "(HRV Unbalanced)"
@@ -251,7 +307,7 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
         session["nutrition"]  = NUTRITION[day_type]
 
     elif day_type == "easy":
-        if taper_days is not None and taper_days <= 14:
+        if in_taper:
             dist = 6
         else:
             dist = easy_km_override if easy_km_override else 8
@@ -260,7 +316,7 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
         session["nutrition"]  = NUTRITION["easy"]
 
     elif day_type == "easy+strides":
-        if taper_days is not None and taper_days <= 14:
+        if in_taper:
             dist = 6
         else:
             dist = easy_km_override if easy_km_override else 8
@@ -280,17 +336,18 @@ def _prescribe_day(weekday: int, day_type: str, phase_key: str,
             # Progressive long run — use override computed per-week, fall back to config peak
             long_km = long_km_override if long_km_override else p.get("long_km", 16)
             # Taper: hard cap within 14 days of race
-            if taper_days is not None and taper_days <= 14:
-                long_km = min(long_km, 12)
+            if in_taper:
+                long_km = min(long_km, tp["long_cap"])
             session["label"]      = "📏 Long Run"
             session["workout"]    = f"{long_km}km — {long_note}"
             session["nutrition"]  = NUTRITION["long"]
 
     # Taper note
-    if taper_days is not None and taper_days <= 14 and day_type not in ("rest", "strength"):
+    if in_taper and day_type not in ("rest", "strength"):
+        race_wk = taper_days <= tp["race_week"]
         session["taper_note"] = (
-            f"⚡ TAPER T-{taper_days} ({'Race Week' if taper_days <= 7 else 'Early Taper'}) — "
-            f"ลด volume {'50%' if taper_days <= 7 else '30%'} ของ peak week"
+            f"⚡ TAPER T-{taper_days} ({'Race Week' if race_wk else 'Early Taper'}) — "
+            f"ลด volume {tp['vol_race'] if race_wk else tp['vol_early']} ของ peak week"
         )
 
     return session
@@ -316,14 +373,14 @@ def generate_week_plan(week: str, bb: int | None, hrv: str,
     phase_info = get_current_phase(monday)
     phase_key  = phase_info["phase"] if phase_info else "quality"
 
-    taper_name, taper_days = _days_to_nearest_race(monday)
-    # Only show taper if within 14 days of a race
-    if taper_days is not None and taper_days > 14:
-        taper_name_display = None
-        taper_days_display = None
-    else:
-        taper_name_display = taper_name
-        taper_days_display = taper_days
+    # Week-level taper banner: any day of this week inside a race's tier window
+    taper_name_display = taper_days_display = None
+    for _d in range(7):
+        _n, _days, _p = _active_taper(monday + timedelta(days=_d))
+        if _n:
+            taper_name_display = _n
+            taper_days_display = _days + _d   # expressed from Monday
+            break
 
     # ── Link to 30-week long-term plan ────────────────────────────────────────
     week_info = get_week_info(monday) if get_week_info else {}
@@ -357,13 +414,17 @@ def generate_week_plan(week: str, bb: int | None, hrv: str,
             })
             continue
 
+        # Taper evaluated PER DAY (was Monday-based for the whole week, so a
+        # Thursday quality 10 days out was still prescribed in an A taper).
+        d_name, d_days, d_prof = _active_taper(target_date)
         session = _prescribe_day(
             wd, day_type, phase_key,
             bb, hrv, pain,
-            taper_days_display, taper_name_display,
+            d_days, d_name,
             target_date,
             long_km_override=long_km_this_week,
             easy_km_override=easy_km_for_week,
+            taper_prof=d_prof,
         )
         sessions.append(session)
 

@@ -54,7 +54,7 @@ flowchart LR
 
   %% ── DATA FILES ────────────────────
   SMASTER["📋 sessions_master.json\nSource of Truth\nis_treadmill · treadmill_phases\nquality_hr_avg · laps\nquality laps pace (GPS)"]:::master
-  SESSIONS["📊 sessions.json\nQuality Sessions\npace (TM-corrected) · avg_hr"]:::sessions
+  SESSIONS["📊 load_quality_log()\nview of sessions_master (v1.7.1)\nTM pace: belt > HR-inferred"]:::sessions
   SKILL["📝 garmin-coach-analyzer.md\nSkill File · Claude Context"]:::skill
 
   %% ── ENTRY POINT ───────────────────
@@ -87,7 +87,6 @@ flowchart LR
   subgraph LP["🟡 Long Pipeline"]
     direction TB
     PSA_L["post_session_analyzer.py\n--update-log"]:::tool
-    TMP_L["tm_patch.py\nbelt_speed > HR-inferred"]:::tool
     EES["energy_efficiency_scorer.py\nStamina·BB·Nutrition"]:::tool
     SS_L["skill_sync.py"]:::tool
   end
@@ -96,7 +95,6 @@ flowchart LR
   subgraph QP["🔥 Quality Pipeline"]
     direction TB
     PSA_Q["post_session_analyzer.py\n--update-log"]:::tool
-    TMP_Q["tm_patch.py\nbelt_speed > HR-inferred"]:::tool
     VE["race_predictor.py\nEstimate · Breakthrough"]:::tool
     SS_Q["skill_sync.py"]:::tool
   end
@@ -166,32 +164,26 @@ flowchart LR
   %% Long
   LONG --> LP
   RAW & LC --> PSA_L
-  PSA_L --> SESSIONS & SMASTER
-  SMASTER -->|treadmill_phases| TMP_L
-  SESSIONS --> TMP_L
-  TMP_L -->|corrected pace| SESSIONS
-  SESSIONS --> EES
+  PSA_L -->|laps + analysis| SMASTER
+  SMASTER --> EES
   HC --> EES
   EES --> SS_L --> SKILL
-  TMMODEL -.->|infer_pace_from_hr| TMP_L
 
   %% Quality
   QUAL --> QP
   RAW & LC --> PSA_Q
-  PSA_Q --> SESSIONS & SMASTER
-  SMASTER -->|treadmill_phases| TMP_Q
-  SESSIONS --> TMP_Q
-  TMP_Q -->|corrected pace| SESSIONS
+  PSA_Q -->|laps + analysis| SMASTER
+  SMASTER --> SESSIONS
   SESSIONS --> VE --> O3
   SMASTER -->|quality laps pace| VE
   VE --> SS_Q --> SKILL
-  TMMODEL -.->|infer_pace_from_hr| TMP_Q
+  TMMODEL -.->|infer_pace_from_hr| SESSIONS
 
   %% Race
   RACE --> RP
   PRU -->|apply| CONFIG --> O4
   RAW & LC --> PSA_R
-  PSA_R --> SESSIONS
+  PSA_R --> SMASTER
   VE_R --> SS_R --> SKILL
 
   %% Analysis
@@ -247,7 +239,7 @@ flowchart LR
   <div class="li"><div class="dot" style="background:#e3b341"></div>Bash Trigger</div>
   <div class="li"><div class="dot" style="background:#f0a500"></div>Universal Entry</div>
   <div class="li"><div class="dot" style="background:#bc8cff"></div>Shared Module / sessions_master</div>
-  <div class="li"><div class="dot" style="background:#388bfd"></div>sessions.json</div>
+  <div class="li"><div class="dot" style="background:#388bfd"></div>quality-log view</div>
   <div class="li"><div class="dot" style="background:#56d364"></div>Output / Skill</div>
   <div class="li" style="color:#6e7681">- - → shared import</div>
 </div>

@@ -28,7 +28,6 @@ from pathlib import Path
 BASE_DIR     = Path(__file__).parent.parent
 TOOLS_DIR    = Path(__file__).parent
 COACH_MCP    = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
-QUALITY_LOG  = BASE_DIR / "QualitySessionLog" / "sessions.json"
 MASTER_JSON  = BASE_DIR / "QualitySessionLog" / "sessions_master.json"
 HEALTH_CACHE = BASE_DIR / "wellness"
 
@@ -64,11 +63,10 @@ sys.path.insert(0, str(COACH_MCP))
 
 
 def _load_sessions(max_sessions: int) -> list[dict]:
-    """Load Long Run sessions from sessions_master (primary) + sessions.json (fallback).
+    """Load Long Run sessions from sessions_master (the single session log).
 
-    sessions_master has ALL sessions (easy + quality) including Long Runs that are
-    never logged to sessions.json (which only stores quality sessions via --update-log).
-    Deduplicates by activity_id, preferring sessions.json records (richer stats).
+    v1.7.1: the old sessions.json fallback was removed — it filtered on a
+    `distance_km` field those rows never had, so it never contributed a row.
     """
     seen_ids: set = set()
     combined: list[dict] = []
@@ -89,24 +87,6 @@ def _load_sessions(max_sessions: int) -> list[dict]:
         except Exception:
             pass
 
-    # --- Fallback: sessions.json (richer stats — stamina_drain_pct etc.) ---
-    if QUALITY_LOG.exists():
-        try:
-            with open(QUALITY_LOG, encoding="utf-8") as f:
-                _raw = json.load(f)
-            for s in (_raw.get("sessions", []) if isinstance(_raw, dict) else _raw):
-                dist  = s.get("distance_km", 0)
-                stype = s.get("session_type", "")
-                aid   = s.get("activity_id")
-                if dist >= LONG_RUN_KM and (stype in LONG_RUN_TYPES or dist >= LONG_RUN_KM):
-                    if aid and aid in seen_ids:
-                        # Replace master record with richer sessions.json record
-                        combined = [x for x in combined if x.get("activity_id") != aid]
-                    combined.append(s)
-                    if aid:
-                        seen_ids.add(aid)
-        except Exception:
-            pass
 
     long_runs = sorted(combined, key=lambda x: x.get("date", ""))
     return long_runs[-max_sessions:]
@@ -153,7 +133,7 @@ def analyze(max_sessions: int) -> dict:
     if not sessions:
         return {
             "error": (
-                f"ไม่พบ Long Run sessions (≥{LONG_RUN_KM}km) ใน sessions_master.json หรือ sessions.json\n"
+                f"ไม่พบ Long Run sessions (≥{LONG_RUN_KM}km) ใน sessions_master.json\n"
                 "รัน run_post_long.sh หลัง Long Run เพื่อให้ได้ stamina_drain_pct ด้วย"
             )
         }

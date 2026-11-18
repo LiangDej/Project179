@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_post_easy.sh — เรียกหลังวิ่ง Easy ทุกครั้ง
 # วิเคราะห์ session + auto-log ลง sessions_master.json
-# หมายเหตุ: skill_sync ไม่รันที่นี่ — easy runs ไม่เข้า sessions.json
+# หมายเหตุ: skill_sync ไม่รันที่นี่ — easy runs ไม่มี grade/analysis (ไม่ใช้ --update-log)
 #           skill_sync รันหลัง Quality/Long Run เท่านั้น (มีข้อมูลใหม่จริง)
 # Treadmill: BELT_KMH=9.0 bash run_post_easy.sh  → per-km form uses belt pace
 set -euo pipefail

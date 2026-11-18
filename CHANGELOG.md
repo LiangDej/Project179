@@ -2,6 +2,32 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [1.7.1] — 2026-11-18
+
+Bug-fix round after v1.7: one session log, taper by race tier, nutrition that
+follows the athlete's own dosing rule. Tools: 32 → 31.
+
+### Fixed
+- **`nutrition_calculator.py` contradicted the athlete's dosing rule.** The solver spreads all Prevo caps over the water stations, so an HM plan said 2–3 caps at once at km 6/12/18 — the athlete's rule (what worked in training) is ONE cap every 4 km + one gel every 6 km. New schedule mode reads `athlete.json → race_day_nutrition.in_race_schedule`, places each dose at its km (none in the last `skip_last_km`), and only *verifies* total Na vs ACSM 40–80% + carbs g/hr. It is the default when the rule exists; `--mode stations` keeps the old solver. The "<40% is fine" verdict now depends on duration (≤2 h) instead of always assuming an HM.
+- **`session_prescriber.py` gave every race the A-race taper.** A B tune-up or C race also got a 14-day window, no quality ≤10 days and long ≤12 km — two lost weeks of quality. Taper now comes from the race tier (A 14/10 d, B 7/3 d, C 3/2 d; optional `races.json → taper_days` override) and is evaluated per day, not from Monday for the whole week (a Thursday quality 10 days before an A race used to survive because Monday was T-13).
+- **Two session logs drifted apart.** `post_session_analyzer --update-log` wrote `sessions.json` while the lap log was `sessions_master.json`, and `tm_patch.py` had to copy type/treadmill/pace corrections across after every run. They had already diverged (a 2026-08-11 threshold existed only in sessions.json, a 2026-06-16 one only in master). Now the graded result is stored on the master record (`analysis` block, `session_logger.save_analysis`), and `session_logger.load_quality_log()` rebuilds the old row shape on read with the treadmill-pace correction (belt speed > HR-inferred laps > HR-inferred avg). race_predictor, skill_sync, injury_risk_detector, weekly_load_report and energy_efficiency_scorer give byte-identical output on the migrated data. The analyzer now logs laps first, then attaches the analysis; if lap logging is skipped, a `_stub` record holds the analysis and a later lap log upgrades it in place.
+- Treadmill pace for 2026-06-14 corrected 6:22 → 6:44/km: tm_patch only looked for belt phases on the master record, where they were missing, and fell back to an HR guess (belt was 8.6–9.0 km/h).
+- **`weekly_load_report.py` printed "E:101%".** Zone km (unrounded) were divided by the 0.1-rounded weekly total.
+- **`season_summary.py` "last 4 weeks" skipped weeks with no runs**, so an injury week vanished and the 4 rows spanned 6 weeks. It now reuses `weekly_load_report.analyze_week` (one weekly-volume calculation).
+- 4 old sessions whose run-window Body Battery Garmin no longer has (one stored a sync-time "69 → 5") are marked `bb_source: "unavailable"` with empty values instead of misleading numbers; the quality-log view never falls back to the old copy.
+
+### Removed
+- **`tm_patch.py`** — see the single-log fix. Pipelines (`run_post_quality.sh`, `run_post_long.sh`) drop the step; step counters fixed (quality printed "Step 4/4" of 3).
+
+### Changed
+- One-off `GarminRawData/migrate_single_log.py` folded `sessions.json` into the master log (backups `*.pre-v1.7.1.bak`, old file kept as `sessions.json.migrated`, all gitignored).
+- `backfill_session_metrics.py` marks unrecoverable BB as unavailable instead of skipping forever.
+- `config.NUTRITION` exposes `in_race_schedule` and gel carbs; `athlete.example.json` shows the optional rule.
+- flow.html, CLAUDE.md (31 tools, 161 checks, single log), README/README_EN (tool table, nutrition row, badge 1.7.1).
+
+### Prevention
+- test_suite section 9 (21 checks): tier windows ordered; B-race keeps quality at T-5 and drops it at T-3; C-race doesn't taper at T-5; `taper_days` override; HM dosing = Prevo 4/8/12/16 + gel 6/12/18, never >1 cap at once, Na total matches labels, nothing in the last 2 km; stub → full record keeps analysis; belt-speed TM pace; master BB beats the analysis copy; duplicate analysis refused; "unavailable" BB never falls back; no tool opens `sessions.json`; zone km sum = unrounded volume; season_summary uses `analyze_week`. `tm_patch.py` added to the stays-removed list. 161 checks; passes with no personal logs (CI).
+
 ## [1.7] — 2026-11-18
 
 Tool consolidation: 36 → 32 tools. Principle: one question = one tool, and

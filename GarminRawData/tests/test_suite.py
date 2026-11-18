@@ -586,12 +586,12 @@ def plausibility_tests():
 
     # v1.7: run-window BB + stamina are written at LOG time (no post-run patchers)
     import session_logger as sl
-    _removed = ["stamina_patcher.py", "daily_aggregator.py", "fuji_race_pacer.py"]
+    _removed = ["stamina_patcher.py", "daily_aggregator.py", "fuji_race_pacer.py", "tm_patch.py"]
     check("consistency: removed patchers/duplicates stay removed (no script calls them)",
           not any((_tools / f).exists() for f in _removed)
           and not (_tools.parent / "fix_session_bb.py").exists()
           and not any(x in p.read_text() for p in _tools.glob("*.sh")
-                      for x in ("stamina_patcher.py ", "fix_session_bb.py\"")))
+                      for x in ("stamina_patcher.py ", "fix_session_bb.py\"", "tm_patch.py")))
 
     class _NoTimeline:            # offline client: stress timeline unavailable
         def get_stress_data(self, d): return {}
@@ -657,6 +657,99 @@ def plausibility_tests():
           isinstance(A.get("coaching_constraints", []), list))
 
 
+def v171_tests():
+    """v1.7.1: tiered taper, athlete dosing rule, single session log, volume source."""
+    print("\n── 9. v1.7.1 REGRESSIONS ─────────────────────────────────")
+    import tempfile
+    import session_prescriber as sp
+    import nutrition_calculator as nc
+    import session_logger as sl
+    import weekly_load_report as wlr
+    from datetime import date as _d
+
+    # ── Tiered taper (was: every race got the 14-day A taper) ──
+    A_, B_, C_ = (sp.TAPER_PROFILES[t] for t in "ABC")
+    check("taper: windows shrink with tier (A > B > C)",
+          A_["window"] > B_["window"] > C_["window"] and A_["no_quality"] > B_["no_quality"] > C_["no_quality"])
+    _day = _d(2026, 1, 6)
+    def _q(days, prof):
+        return sp._prescribe_day(1, "quality1", "quality", 80, "balanced", "none",
+                                 days, "R", _day, taper_prof=prof)["decision"]
+    check("taper: B-race 5 days out keeps the quality session", _q(5, B_) == "GO")
+    check("taper: B-race 3 days out → quality becomes easy", _q(3, B_) == "MODIFY")
+    check("taper: A-race 10 days out → quality becomes easy (unchanged A rule)", _q(10, A_) == "MODIFY")
+    _saved = sp.RACE_DATES
+    try:
+        sp.RACE_DATES = [{"name": "C", "date": _d(2026, 1, 11), "tier": "C", "taper_days": None}]
+        check("taper: C-race 5 days out does not taper the day", sp._active_taper(_d(2026, 1, 6))[0] is None)
+        check("taper: C-race 2 days out does", sp._active_taper(_d(2026, 1, 9))[1] == 2)
+        sp.RACE_DATES = [{"name": "X", "date": _d(2026, 1, 11), "tier": "B", "taper_days": 10}]
+        check("taper: races.json taper_days overrides the tier window",
+              sp._active_taper(_d(2026, 1, 2))[1] == 9)
+    finally:
+        sp.RACE_DATES = _saved
+
+    # ── Athlete dosing rule (was: 2–3 Prevo bundled per water station) ──
+    _rule = {"prevo_every_km": 4, "gel_every_km": 6, "max_prevo_per_stop": 1,
+             "pre_prevo": 1, "pre_gel": 1, "skip_last_km": 2}
+    hm = nc.schedule_plan(21.0975, 3000, _rule)
+    check("nutrition: HM rule → Prevo at 4/8/12/16, gel at 6/12/18",
+          [x["km"] for x in hm["stops"] if x["prevo"]] == [4, 8, 12, 16]
+          and [x["km"] for x in hm["stops"] if x["gel"]] == [6, 12, 18], str(hm["stops"]))
+    check("nutrition: never more than 1 Prevo at once", hm["max_prevo_at_once"] == 1)
+    check("nutrition: Na total = (pre + in-race) × label values",
+          hm["plan_na"] == 5 * nc.PREVO_NA_MG + 4 * nc.AMINOVITAL_NA, str(hm["plan_na"]))
+    fm = nc.schedule_plan(42.195, 6000, _rule)
+    check("nutrition: no dose inside the last skip_last_km",
+          max(x["km"] for x in fm["stops"]) <= 42.195 - 2)
+
+    # ── Single session log (was: sessions.json + tm_patch sync) ──
+    _orig = sl.MASTER_PATH
+    with tempfile.TemporaryDirectory() as td:
+        sl.MASTER_PATH = Path(td) / "sessions_master.json"
+        try:
+            entry = {"date": "2026-01-02", "activity_id": 900, "session_type": "Threshold (T)",
+                     "is_treadmill": True, "pace": "5:00/km", "avg_hr": 170, "max_hr": 180,
+                     "grade": "A", "bb_start": 80, "bb_end": 60}
+            check("single-log: analysis without lap log creates a stub", sl.save_analysis(entry)
+                  and sl._load_master()["sessions"][0].get("_stub") is True)
+            check("single-log: a stub does not block the lap-level log", not sl._is_logged(900, sl._load_master()))
+            m = sl._load_master()
+            sl._insert_record(m, {"date": "2026-01-02", "activity_id": 900, "session_type": "threshold",
+                                  "is_treadmill": True, "laps": [],
+                                  "treadmill_phases": [{"speed_kmh": 12.0, "distance_km": 5.0},
+                                                       {"speed_kmh": 8.0, "distance_km": 2.0}],
+                                  "bb_start": 78, "bb_end": 55, "bb_source": "activity_diff"})
+            sl._save_master(m)
+            rows = sl.load_quality_log()
+            check("single-log: full record replaces stub and keeps the analysis",
+                  len(sl._load_master()["sessions"]) == 1 and rows and rows[0]["grade"] == "A")
+            check("single-log: treadmill pace from belt speed (12 km/h → 5:00)",
+                  rows[0]["pace"] == "5:00/km" and rows[0]["pace_source"] == "belt_speed", str(rows[0]))
+            check("single-log: master BB wins over the analysis copy", rows[0]["bb_end"] == 55)
+            check("single-log: second analysis of same activity is refused", not sl.save_analysis(entry))
+            m = sl._load_master()
+            m["sessions"][0].update({"bb_start": None, "bb_end": None, "bb_source": "unavailable"})
+            sl._save_master(m)
+            check("single-log: bb_source=unavailable never falls back to old BB",
+                  sl.load_quality_log()[0]["bb_end"] is None)
+        finally:
+            sl.MASTER_PATH = _orig
+    _tools = Path(sl.__file__).parent
+    _src = [f for f in _tools.glob("*.py")]
+    check("single-log: no tool opens QualitySessionLog/sessions.json any more",
+          not any('"sessions.json"' in f.read_text() for f in _src))
+
+    # ── Weekly volume: one source, no >100% zones ──
+    acts = [{"startTimeLocal": "2026-01-05 07:00:00", "distance": 2534, "duration": 900,
+             "averageHR": 130, "maxHR": 140}]
+    wk = wlr.analyze_week(acts, "2026-01-05", "2026-01-11")
+    check("weekly: zone km sum equals unrounded volume (no 101%)",
+          abs(sum(wk["zones"].values()) - 2.534) < 1e-9)
+    check("weekly: season_summary reuses analyze_week (single volume source)",
+          "analyze_week" in (_tools / "season_summary.py").read_text())
+
+
 def main():
     _require_athlete_data()
     print("=" * 60)
@@ -686,6 +779,7 @@ def main():
 
     # 8. Plausibility (outputs make physiological sense)
     plausibility_tests()
+    v171_tests()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
     total  = len(_RESULTS)

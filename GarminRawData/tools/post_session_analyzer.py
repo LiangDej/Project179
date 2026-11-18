@@ -35,7 +35,9 @@ from config import ATHLETE, HR_ZONES, BASELINES, ZONE_PCT  # noqa: E402
 ZONE_LABELS = ["Z1(Easy)", "Z2(M)", "Z3(T)", "Z4(I)", "Z5(R)"]
 ZONES = HR_ZONES  # alias for compatibility
 
-SESSION_LOG_PATH = BASE_DIR / "QualitySessionLog" / "sessions.json"
+# v1.7.1: single session log — graded results go into sessions_master.json
+# (record["analysis"]) via session_logger.save_analysis; sessions.json retired.
+SESSION_LOG_PATH = BASE_DIR / "QualitySessionLog" / "sessions_master.json"
 
 
 # ---------------------------------------------------------------------------
@@ -1017,21 +1019,13 @@ def _treadmill_effective_stats(phases: list) -> dict:
 # Session log (Gap 1 — auto-update)
 # ---------------------------------------------------------------------------
 def load_session_log():
-    SESSION_LOG_PATH.parent.mkdir(exist_ok=True)
-    if SESSION_LOG_PATH.exists():
-        with open(SESSION_LOG_PATH) as f:
-            return json.load(f)
-    return {"sessions": []}
-
-
-def save_session_log(log):
-    SESSION_LOG_PATH.parent.mkdir(exist_ok=True)
-    with open(SESSION_LOG_PATH, "w") as f:
-        json.dump(log, f, indent=2, ensure_ascii=False)
+    """Analysed sessions (legacy row shape) — single log since v1.7.1."""
+    from session_logger import load_quality_log
+    return {"sessions": load_quality_log()}
 
 
 def log_session(act_id, date_str, r):
-    """Append session result to QualitySessionLog/sessions.json."""
+    """Store the graded session result on its sessions_master.json record."""
     log = load_session_log()
 
     # Check if already logged
@@ -1117,13 +1111,11 @@ def log_session(act_id, date_str, r):
         entry["total_km_actual"]   = effective_stats.get("total_km_actual")
         entry["quality_pct"]       = effective_stats.get("quality_pct")
 
-    log["sessions"].append(entry)
-    # Sort by activity_id (monotonic with time), not date-string — avoids
-    # a non-ISO "date" value sorting above real dates and pinning a stale
-    # session at index 0 (see session_logger.stamina_from_details).
-    log["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
-    save_session_log(log)
-    print(f"✅ Session logged → {SESSION_LOG_PATH}")
+    from session_logger import save_analysis
+    if save_analysis(entry):
+        print(f"✅ Session analysis logged → {SESSION_LOG_PATH.name}")
+    else:
+        print(f"ℹ️  Session {act_id} already analysed — skipping.")
 
 
 # ---------------------------------------------------------------------------
@@ -1135,7 +1127,7 @@ def main():
     group.add_argument("--latest", action="store_true", help="Analyze most recent activity")
     group.add_argument("--id", type=int, help="Garmin Activity ID to analyze")
     parser.add_argument("--update-log", action="store_true",
-                        help="Append session result to QualitySessionLog/sessions.json")
+                        help="Log graded result into QualitySessionLog/sessions_master.json (analysis block)")
     parser.add_argument("--rep-speeds", type=str, default=None,
                         help="TM only: actual rep speeds in km/h, comma-separated "
                              "(e.g. '11.5,11.5,11.5'). Overrides unreliable Garmin TM pace.")
@@ -1228,19 +1220,12 @@ def _run(args):
         except Exception as e:
             print(f"\n⚠️  Energy efficiency score unavailable ({e})")
 
-    if args.update_log:
-        log_session(act_id, report_date, r)
-
-    # Auto-log to sessions_master.json — unconditional for Easy Run (matches
-    # run_post_easy.sh, which intentionally never passes --update-log since
-    # easy runs never belong in sessions.json / VDOT tracking at all). For
-    # every other (quality) type, require --update-log so it can't write
-    # sessions_master.json without the matching sessions.json entry from
-    # log_session() above — see CLAUDE.md's single-source-of-truth policy.
-    # Previously this ran unconditionally for every session type, so an
-    # ad-hoc "just check this run" call on a QUALITY session silently wrote
-    # sessions_master.json without sessions.json, causing 3+ weeks of drift
-    # (race_predictor/skill_sync all read sessions.json only).
+    # Lap-level log first (sessions_master.json) — unconditional for Easy Run
+    # (run_post_easy.sh never passes --update-log); quality types require
+    # --update-log so an ad-hoc "just check this run" call writes nothing.
+    # Runs BEFORE log_session so the analysis attaches to the full lap record
+    # (v1.7.1 single log); if lap logging is skipped/fails, save_analysis
+    # creates a stub that a later session_logger run upgrades in place.
     is_easy_session = r.get("session_type") == "Easy Run"
     if is_easy_session or args.update_log:
         try:
@@ -1248,6 +1233,9 @@ def _run(args):
             auto_log(act_id, data, r, report_date)
         except Exception:
             pass
+
+    if args.update_log:
+        log_session(act_id, report_date, r)
 
     _keys = ("session_type", "avg_hr", "max_hr", "pace", "decoupling", "cadence", "gct",
              "vr", "stride", "zone_pct", "grade", "stam_start", "stam_end", "bb_start", "bb_end")

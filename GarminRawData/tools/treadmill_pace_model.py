@@ -1,7 +1,7 @@
 """
 treadmill_pace_model.py — Single source for TM HR→Pace interpolation.
 
-Imported by: tm_patch.py, session_logger.py
+Imported by: session_logger.py
 DO NOT duplicate the anchor table elsewhere.
 
 Calibration: Bangkok TM sessions, 20°C, incline 1%, Garmin Forerunner optical HR.

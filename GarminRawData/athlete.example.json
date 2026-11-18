@@ -64,7 +64,16 @@
     "_comment": "Race morning pre-race protocol. Adjust timing and products to your stomach.",
     "pre_150min": "Carb source 25g",
     "pre_30min": "Gel + electrolyte cap x2",
-    "in_race": "Per km plan from nutrition_calculator"
+    "in_race": "Per km plan from nutrition_calculator",
+    "in_race_schedule": {
+      "_comment": "Optional fixed dosing rule. nutrition_calculator uses it instead of splitting caps across water stations. Delete this block to use the station solver.",
+      "prevo_every_km": 4,
+      "gel_every_km": 6,
+      "max_prevo_per_stop": 1,
+      "pre_prevo": 1,
+      "pre_gel": 1,
+      "skip_last_km": 2
+    }
   },
 
   "long_run_nutrition": {

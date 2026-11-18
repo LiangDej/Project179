@@ -6,7 +6,7 @@ race_predictor.py — Race Time Predictor จาก Fitness ปัจจุบ�
 พร้อมบอก gap ถึง Goal A/B และคำแนะนำว่าต้องทำอะไรต่อ
 
 Logic:
-  1. อ่าน QualitySessionLog/sessions.json
+  1. อ่าน quality log (session_logger.load_quality_log → sessions_master.json)
   2. ประเมิน VDOT จาก pace และ HR ของแต่ละ session
      - T-session: VDOT จาก effective VO2 ที่ HR relative to T-zone
      - I-session: VDOT จาก I-pace โดยตรง (เปรียบเทียบกับ 5km equivalent)
@@ -31,7 +31,6 @@ from pathlib import Path
 from datetime import date, datetime, timedelta
 
 BASE_DIR     = Path(__file__).parent.parent
-LOG_PATH     = BASE_DIR / "QualitySessionLog" / "sessions.json"
 MASTER_PATH  = BASE_DIR / "QualitySessionLog" / "sessions_master.json"
 sys.path.append(str(BASE_DIR.parent / "skills" / "garmin_coach_mcp"))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -220,11 +219,9 @@ def load_quality_hr_index() -> dict:
 
 
 def load_session_log():
-    if not LOG_PATH.exists():
-        return []
-    with open(LOG_PATH) as f:
-        data = json.load(f)
-    return data.get("sessions", [])
+    # Single log since v1.7.1 — analysed rows rebuilt from sessions_master
+    from session_logger import load_quality_log
+    return load_quality_log()
 
 
 PLAUSIBLE_BAND = 5.0      # VDOT points from race-confirmed value
