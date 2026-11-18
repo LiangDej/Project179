@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.6-blue)
+![Version](https://img.shields.io/badge/version-1.7-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -213,7 +213,7 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 ---
 
-**`daily_aggregator.py`** — Merge multiple sessions in one day
+**`weekly_load_report.py` / `training_load.py`** — Merge multiple sessions in one day (all tools already sum multi-session days via activity_loader — daily_aggregator removed in v1.7)
 
 | Say | You get |
 |---|---|
@@ -304,7 +304,7 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 ---
 
-**`fuji_race_pacer.py`** — Hilly course pace strategy
+**`race_pace_planner.py --elevation course.csv`** — Hilly course pace strategy (CSV: distance_km, elevation_m)
 
 | Say | You get |
 |---|---|
@@ -387,11 +387,11 @@ No need to memorize these — the agent explains them every time it uses them. J
 
 ---
 
-**`stamina_patcher.py`** — Patch stamina data
+**`../backfill_session_metrics.py`** — Backfill stamina + Body Battery for old records (since v1.7 session_logger records them correctly at log time — no post-run patching)
 
 | Say | You get |
 |---|---|
-| "Stamina data in my log is incomplete, patch it" | Backfills stamina_drain_pct into sessions that are missing it |
+| "Stamina data in my log is incomplete, patch it" | Backfills stamina_drain_pct + run-window BB into old sessions that are missing them |
 
 ---
 

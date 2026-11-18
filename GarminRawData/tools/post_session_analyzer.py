@@ -1120,7 +1120,7 @@ def log_session(act_id, date_str, r):
     log["sessions"].append(entry)
     # Sort by activity_id (monotonic with time), not date-string — avoids
     # a non-ISO "date" value sorting above real dates and pinning a stale
-    # session at index 0 (see stamina_patcher.py / session_logger.py).
+    # session at index 0 (see session_logger.stamina_from_details).
     log["sessions"].sort(key=lambda s: s.get("activity_id", 0), reverse=True)
     save_session_log(log)
     print(f"✅ Session logged → {SESSION_LOG_PATH}")

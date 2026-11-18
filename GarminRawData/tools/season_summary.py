@@ -197,7 +197,7 @@ def main():
     print(f"\n🔋 STAMINA DATA")
     print(SEP)
     try:
-        from stamina_patcher import MASTER_JSON
+        from session_logger import MASTER_PATH as MASTER_JSON
         master   = json.loads(MASTER_JSON.read_text()) if MASTER_JSON.exists() else {}
         sessions = master.get("sessions", [])
         patched  = sum(1 for s in sessions if s.get("stamina_drain_pct") is not None)
@@ -205,7 +205,7 @@ def main():
                        if s.get("stamina_drain_pct") is None and not s.get("stamina_unavailable"))
         print(f"   Patched : {patched}/{len(sessions)} sessions")
         if pending:
-            print(f"   Pending : {pending} sessions (run `stamina_patcher.py --backfill`)")
+            print(f"   Pending : {pending} sessions (old records — run `../backfill_session_metrics.py`)")
         else:
             print("   ✅ All sessions accounted for")
     except Exception as e:

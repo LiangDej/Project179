@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.6-blue)
+![Version](https://img.shields.io/badge/version-1.7-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -212,7 +212,7 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 
 ---
 
-**`daily_aggregator.py`** — รวม sessions ในวันเดียว
+**`weekly_load_report.py` / `training_load.py`** — รวม sessions ในวันเดียว (ทุก tool รวมหลาย session ต่อวันอยู่แล้วผ่าน activity_loader — daily_aggregator ลบใน v1.7)
 
 | พูดว่า | ได้ |
 |---|---|
@@ -303,7 +303,7 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 
 ---
 
-**`fuji_race_pacer.py`** — pace strategy สนามเนิน
+**`race_pace_planner.py --elevation course.csv`** — pace strategy สนามเนิน (CSV: distance_km, elevation_m)
 
 | พูดว่า | ได้ |
 |---|---|
@@ -386,11 +386,11 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 
 ---
 
-**`stamina_patcher.py`** — patch stamina data
+**`../backfill_session_metrics.py`** — backfill stamina + Body Battery ของ record เก่า (ตั้งแต่ v1.7 session_logger บันทึกถูกตั้งแต่แรก ไม่ต้อง patch หลังวิ่ง)
 
 | พูดว่า | ได้ |
 |---|---|
-| "Stamina data ใน log ยังไม่ครบ patch ให้หน่อย" | backfill stamina_drain_pct เข้า sessions ที่ยังไม่มีข้อมูล |
+| "Stamina data ใน log ยังไม่ครบ patch ให้หน่อย" | backfill stamina_drain_pct + BB ช่วงวิ่ง เข้า sessions เก่าที่ยังไม่มีข้อมูล |
 
 ---
 

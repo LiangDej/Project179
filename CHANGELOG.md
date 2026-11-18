@@ -2,7 +2,22 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
-## [Unreleased]
+## [1.7] — 2026-11-18
+
+Tool consolidation: 36 → 32 tools. Principle: one question = one tool, and
+records are written right at log time instead of patched afterwards.
+
+### Removed
+- **`fuji_race_pacer.py`** — Fuji archived; hilly-course pacing is `race_pace_planner.py --elevation course.csv` (same Minetti grade model).
+- **`daily_aggregator.py`** — never wired in; `training_load` / `weekly_load_report` / `season_summary` already sum multi-session days via `activity_loader`.
+- **`stamina_patcher.py`** and **`fix_session_bb.py`** (post-run patchers) — see Fixed.
+
+### Fixed
+- **Session records stored the wrong Body Battery until a patcher overwrote them.** `session_logger._build_record` saved `bb_start` = the day's peak and `bb_end` = BB at sync time (an afternoon 25 km read "89 → 17, drop 72"; Garmin's figure was −27), so every pipeline ran `fix_session_bb.py` + `stamina_patcher.py` afterwards. Both values are in the activity-details dict already: new `session_logger.run_window_bb()` (activity `differenceBodyBattery` + 3-min stress timeline) and `stamina_from_details()` fill them at log time, stamped with `bb_source`. Verified identical to the patched values on 5 cached sessions. With no drop info the end value stays empty instead of being fabricated.
+- One-off `GarminRawData/backfill_session_metrics.py` (replaces both patchers, not in the pipeline) backfilled stamina for 42 older records that the patcher had missed (no cache at patch time); 122/122 now have stamina.
+
+### Not changed (deliberately)
+- `tm_patch.py` stays: it syncs user-confirmed type / treadmill pace from `sessions_master.json` into `sessions.json`. Removing it properly means retiring the two-log design (sessions.json vs sessions_master.json) — a larger change for a later version.
 
 ### Changed
 - **`vdot_estimator.py` merged into `race_predictor.py` and removed (35 tools).** Two tools answered "what's my VDOT?" with different methods and contradictory results on the same day (race_predictor: training estimate +1.1; vdot_estimator: "−8.9 gap" from a top-3 pace-only average). A pace-only average of *training* sessions systematically under-reads (training pace < race effort), so it was dropped. Its one useful part — the **breakthrough flag** (an outdoor quality session whose heat-adjusted quality-lap pace alone implies VDOT ≥ confirmed + 1) — now lives in `race_predictor.find_breakthroughs()` as a list of sessions, not a second number. Interval reps get the same +15 s/km continuous-effort equivalent as the estimator (a 4:16 5×1 km had read as "VDOT 46"), and results beyond the ±5 plausibility band are dropped as artefacts.
@@ -10,7 +25,8 @@
 - `run_post_quality.sh` / `run_post_race.sh` call `race_predictor.py`; skill file, README, CLAUDE.md, flow.html updated.
 
 ### Prevention
-- test_suite: vdot_estimator must stay merged (file absent, no script references); breakthrough pace-VDOT must lie within confirmed +1…+5; `--json` carries the required keys. 136 checks.
+- test_suite: vdot_estimator must stay merged (file absent, no script references); breakthrough pace-VDOT must lie within confirmed +1…+5; `--json` carries the required keys.
+- test_suite: removed patchers/duplicates stay removed; run-window BB uses the activity drop and never fabricates an end value; stamina parsing. 140 checks.
 
 ### Fixed
 - **race_predictor FM goal VDOT ignored the endurance factor** — the "need VDOT X" line used `compute_vdot(42195, goal)` (pure prediction) while the gap beside it used the personal (× `fm_endurance_factor`) prediction, printing e.g. "ยังขาด 22:41 | ต้องการ VDOT 37.9 (gap +-3.2)" for sub-4 at VDOT 41 — a goal that looked already met. New `fm_goal_requirements()` solves for goal ÷ factor, and also reports the endurance factor that would hit the goal at the current VDOT. HM/FM gap now formats with sign (`+4.7`, not `+-3.2`).

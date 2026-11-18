@@ -35,19 +35,8 @@ else
   printf '%s' "$AUTO_ANSWERS" | "$(bash "$TOOLS_DIR/get_python.sh")" post_session_analyzer.py --latest ${BELT_KMH:+--belt-kmh "$BELT_KMH"}
 fi
 
-# ── Auto-patch stamina_drain_pct → sessions_master.json ────────────────────
-echo ""
-echo "▶ Stamina patch"
-if [ -n "${1:-}" ]; then
-  "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py --id "${1:-}"
-else
-  "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py
-fi
-
-# ── Fix bb_start/bb_end → run window only (session_logger stores day peak) ──
-echo ""
-echo "▶ Body Battery (run-window fix)"
-"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fix_session_bb.py"
+# (v1.7) Stamina + run-window Body Battery are now written by session_logger
+# at log time — the stamina_patcher / fix_session_bb steps are gone.
 
 # ── Recalculate Energy Efficiency Score ────────────────────────────────────
 echo ""

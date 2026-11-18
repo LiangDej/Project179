@@ -231,6 +231,69 @@ def _prompt_treadmill_phases() -> list | None:
 # Core record builder
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Run-window Body Battery + Stamina — computed AT LOG TIME (v1.7)
+# ---------------------------------------------------------------------------
+# Why: the record used to store bb_start = the DAY's peak (bb_high) and
+# bb_end = BB at sync time, so an afternoon 25 km run read "89 → 17 (drop 72)"
+# when Garmin's own figure was −27. Two patchers (fix_session_bb.py,
+# stamina_patcher.py — both removed) ran after every log to overwrite it. The data they need
+# is already in the activity-details dict, so the record is now built right.
+BB_MATCH_MAX_GAP_MS = 6 * 60 * 1000   # stress timeline is sampled every 3 min
+
+
+def _summary_of(activity: dict) -> dict:
+    s = activity.get("_activitySummary") or {}
+    return s.get("summaryDTO") or s or {}
+
+
+def stamina_from_details(activity: dict) -> tuple[int | None, int | None]:
+    """(start %, end %) of directAvailableStamina from an activity-details dict."""
+    desc = {d.get("key"): d.get("metricsIndex") for d in activity.get("metricDescriptors", [])}
+    idx = desc.get("directAvailableStamina")
+    if idx is None:
+        return None, None
+    vals = [p["metrics"][idx] for p in activity.get("activityDetailMetrics", [])
+            if idx < len(p.get("metrics", [])) and p["metrics"][idx] is not None]
+    return (int(vals[0]), int(vals[-1])) if vals else (None, None)
+
+
+def run_window_bb(activity: dict, fallback_start=None, client=None) -> dict:
+    """Body Battery for the RUN WINDOW only.
+    drop     = |differenceBodyBattery| of the activity (Garmin's own figure);
+               fallback = timeline BB at start − at end
+    bb_start = 3-min stress-timeline BB at run start (fallback: fallback_start)
+    Returns {bb_start, bb_end, bb_source}; values None if nothing reliable.
+    """
+    summ = _summary_of(activity)
+    diff = summ.get("differenceBodyBattery", activity.get("differenceBodyBattery"))
+    start = (summ.get("startTimeLocal") or activity.get("startTimeLocal") or "")[:19].replace("T", " ")
+    dur = summ.get("duration") or activity.get("duration") or 0
+    t_start = t_end = None
+    if start:
+        try:
+            client = client or get_client()
+            sd = client.get_stress_data(start[:10])
+            tl = [(v[0], v[2]) for v in (sd.get("bodyBatteryValuesArray") or [])
+                  if len(v) > 2 and v[2] is not None]
+            sms = datetime.strptime(start, "%Y-%m-%d %H:%M:%S").timestamp() * 1000
+
+            def _near(ms):
+                best = min(tl, key=lambda p: abs(p[0] - ms), default=None)
+                return best[1] if best and abs(best[0] - ms) <= BB_MATCH_MAX_GAP_MS else None
+            t_start, t_end = _near(sms), _near(sms + dur * 1000)
+        except Exception:
+            pass
+    drop = abs(diff) if diff not in (None, 0) else (
+        t_start - t_end if None not in (t_start, t_end) and t_start != t_end else None)
+    bb_start = t_start if t_start is not None else fallback_start
+    if drop is None or bb_start is None:
+        return {"bb_start": bb_start, "bb_end": None, "bb_source": None}
+    return {"bb_start": bb_start, "bb_end": max(bb_start - drop, 0),
+            "bb_source": ("activity_diff" if diff not in (None, 0) else "timeline")
+                         + ("" if t_start is not None else "+start_fallback")}
+
+
 def _build_record(activity: dict, laps_data: dict, health: dict | None,
                   session_type: str, interactive: bool = True,
                   treadmill_phases: list | None = None,
@@ -298,6 +361,12 @@ def _build_record(activity: dict, laps_data: dict, health: dict | None,
     else:
         stored_laps = [_slim_lap(l) for l in annotated_laps]
 
+    bb = run_window_bb(activity, fallback_start=health.get("bb_high") if health else None)
+    stam_start, stam_end = stamina_from_details(activity)
+    stamina = ({"stam_start": stam_start, "stam_end": stam_end,
+                "stamina_drain_pct": stam_start - stam_end}
+               if stam_start is not None else {})
+
     return {
         "date":              date_str,
         "activity_id":       activity_id,
@@ -312,8 +381,10 @@ def _build_record(activity: dict, laps_data: dict, health: dict | None,
         "quality_hr_avg":    quality_hr_avg,
         "laps":              stored_laps,
         "treadmill_phases":  treadmill_phases,
-        "bb_start":          health.get("bb_high") if health else None,
-        "bb_end":            health.get("body_battery") if health else None,
+        "bb_start":          bb["bb_start"],
+        "bb_end":            bb["bb_end"],
+        "bb_source":         bb["bb_source"],
+        **stamina,
         "logged_at":         datetime.now().isoformat(timespec="seconds"),
     }
 

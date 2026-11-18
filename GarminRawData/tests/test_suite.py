@@ -581,6 +581,30 @@ def plausibility_tests():
           {"vdot_confirmed", "training_estimate", "breakthroughs", "goals"} <= set(_res)
           and _res["vdot_confirmed"] == A["vdot"], str(list(_res)))
 
+    # v1.7: run-window BB + stamina are written at LOG time (no post-run patchers)
+    import session_logger as sl
+    _removed = ["stamina_patcher.py", "daily_aggregator.py", "fuji_race_pacer.py"]
+    check("consistency: removed patchers/duplicates stay removed (no script calls them)",
+          not any((_tools / f).exists() for f in _removed)
+          and not (_tools.parent / "fix_session_bb.py").exists()
+          and not any(x in p.read_text() for p in _tools.glob("*.sh")
+                      for x in ("stamina_patcher.py ", "fix_session_bb.py\"")))
+
+    class _NoTimeline:            # offline client: stress timeline unavailable
+        def get_stress_data(self, d): return {}
+    _act = {"_activitySummary": {"summaryDTO": {"differenceBodyBattery": -27,
+            "startTimeLocal": "2026-09-20T15:00:00", "duration": 9000}},
+            "metricDescriptors": [{"key": "directAvailableStamina", "metricsIndex": 0}],
+            "activityDetailMetrics": [{"metrics": [100]}, {"metrics": [88]}, {"metrics": [74]}]}
+    _bb = sl.run_window_bb(_act, fallback_start=53, client=_NoTimeline())
+    check("plausibility: run-window BB uses the activity's own drop (−27), not day peak→sync value",
+          _bb["bb_start"] == 53 and _bb["bb_end"] == 26 and _bb["bb_source"].startswith("activity_diff"),
+          str(_bb))
+    check("plausibility: run-window BB with no drop info → no fabricated end value",
+          sl.run_window_bb({}, fallback_start=80, client=_NoTimeline())["bb_end"] is None)
+    check("unit: stamina_from_details reads first/last directAvailableStamina",
+          sl.stamina_from_details(_act) == (100, 74) and sl.stamina_from_details({}) == (None, None))
+
     rb = A["rhr"]
     d1, _ = db.readiness_decision(80, "balanced", "quality1", rhr=rb + 9, rhr_baseline=rb)
     d2, _ = db.readiness_decision(80, "balanced", "long", rhr=rb + 5, rhr_baseline=rb)

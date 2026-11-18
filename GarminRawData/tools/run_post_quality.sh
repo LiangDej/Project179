@@ -47,21 +47,8 @@ echo "▶ Step 2/3 — Training estimate + breakthrough (race_predictor)"
 echo "────────────────────────────────────"
 "$(bash "$TOOLS_DIR/get_python.sh")" race_predictor.py
 
-# ── Step 3: Stamina patch ───────────────────────────────────────────────────
-echo ""
-echo "▶ Step 3/4 — Stamina Patch"
-echo "────────────────────────────────────"
-if [ -n "${1:-}" ]; then
-  "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py --id "${1:-}"
-else
-  "$(bash "$TOOLS_DIR/get_python.sh")" stamina_patcher.py
-fi
-
-# ── Step 3.5: Body Battery run-window fix (session_logger stores day peak) ──
-echo ""
-echo "▶ Step 3.5 — Body Battery (run-window fix)"
-echo "────────────────────────────────────"
-"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fix_session_bb.py"
+# (v1.7) Stamina + run-window Body Battery are now written by session_logger
+# at log time — the stamina_patcher / fix_session_bb steps are gone.
 
 # ── Step 4: Sync skill file ─────────────────────────────────────────────────
 echo ""
