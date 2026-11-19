@@ -49,7 +49,6 @@ BASE_DIR = Path(__file__).parent.parent
 sys.path.append(str(BASE_DIR.parent / "skills" / "garmin_coach_mcp"))
 from config import ATHLETE, BASELINES, ZONE_PCT  # noqa: E402
 
-ACTS_FILE = BASE_DIR / "running_activities_all.json"
 RUN_TYPES = {"running", "treadmill_running", "trail_running"}
 
 
@@ -57,23 +56,9 @@ RUN_TYPES = {"running", "treadmill_running", "trail_running"}
 # Load activities (live + file, merged & deduped)
 # ---------------------------------------------------------------------------
 def load_activities(limit=80):
-    acts = {}
-    # File first (history)
-    if ACTS_FILE.exists():
-        try:
-            for a in json.loads(ACTS_FILE.read_text()):
-                acts[a.get("activityId")] = a
-        except Exception:
-            pass
-    # Live overlay (recent runs not yet synced to file)
-    try:
-        from garmin_client import get_client, garmin_get
-        client = get_client()
-        for a in garmin_get(client.get_activities, 0, limit):
-            acts[a.get("activityId")] = a
-    except Exception as e:
-        print(f"⚠️  live fetch ไม่ได้ ({e}) — ใช้ไฟล์ history อย่างเดียว")
-    return list(acts.values())
+    """Shared loader (file + live) — was a private copy of activity_loader."""
+    from activity_loader import load_activities_merged
+    return sorted(load_activities_merged(limit), key=lambda a: a.get("startTimeLocal", ""))
 
 
 def parse_runs(acts, days):

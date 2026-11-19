@@ -26,42 +26,18 @@ from dotenv import load_dotenv
 load_dotenv(os.path.expanduser("~/.config/garmin-coach/.env"))
 
 try:
-    from config import ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS
+    from config import ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS, NUTRITION
 except ImportError:
     print("❌ config.py not found — run from GarminRawData/tools/")
     sys.exit(1)
 
-# ---------------------------------------------------------------------------
-# Bangkok monthly climate averages (6 AM race time approximation)
-# Source: Thai Meteorological Department 30-year normals + personal observations
-# Used as fallback when no API key and no --manual values given
-# ---------------------------------------------------------------------------
-BANGKOK_CLIMATE = {
-    #  month: (temp_c, humidity_pct, dew_c, wind_mps)
-    1:  (24.5, 70, 18.5, 1.8),
-    2:  (26.0, 68, 19.5, 1.9),
-    3:  (28.0, 72, 21.5, 2.0),
-    4:  (29.5, 75, 23.0, 2.1),
-    5:  (29.0, 79, 24.0, 2.2),
-    6:  (28.5, 82, 24.5, 2.3),
-    7:  (28.0, 83, 24.5, 2.2),
-    8:  (28.0, 84, 24.5, 2.2),
-    9:  (27.5, 84, 24.0, 1.8),
-    10: (27.0, 80, 23.0, 1.7),
-    11: (26.0, 75, 21.0, 1.6),
-    12: (24.5, 68, 18.0, 1.7),
-}
-
-# Thailand Local Race (Bangkok, early December) 6 AM averages
-FUJI_CLIMATE = {
-    12: (24.5, 68, 18.0, 1.7),
-}
+from bangkok_climate import BANGKOK_CLIMATE, ely_penalty_fraction  # noqa: E402  (one climate table + heat model)
 
 
 def get_climate_fallback(race: str, month: int | None = None) -> dict:
     """Return typical climate dict for a race location + month.
     Tries race-specific expected conditions from races.json first,
-    then falls back to monthly Bangkok/Fuji climate averages.
+    then falls back to the monthly Bangkok climate table.
     """
     from datetime import date as _date
     m = month or _date.today().month
@@ -82,11 +58,8 @@ def get_climate_fallback(race: str, month: int | None = None) -> dict:
     except Exception:
         pass
 
-    # Generic monthly fallback
-    if race == "fuji":
-        t, rh, dew, wind = FUJI_CLIMATE.get(m, (3.0, 55, -4.0, 2.5))
-    else:
-        t, rh, dew, wind = BANGKOK_CLIMATE.get(m, (28.0, 80, 23.0, 2.0))
+    # Generic monthly fallback (non-Bangkok races: put expected_* in races.json)
+    t, rh, dew, wind = BANGKOK_CLIMATE[m]
     return {
         "temp": t, "humidity": rh, "dew": dew,
         "wind": wind, "desc": f"climate avg (month {m})",
@@ -95,30 +68,20 @@ def get_climate_fallback(race: str, month: int | None = None) -> dict:
 
 # ---------------------------------------------------------------------------
 # Race locations — loaded from races.json via race_registry (single source of truth)
-# Falls back to hardcoded Bangkok coords if race_registry unavailable
+# No hardcoded coordinates: a race without lat/lon in races.json has no
+# live-weather location (the tool then uses races.json expected_* / climate).
 # ---------------------------------------------------------------------------
-_BANGKOK_DEFAULT = {"name": "Bangkok, Thailand", "lat": 13.7563, "lon": 100.5018, "tz_offset": 7}
-try:
-    from race_registry import list_races as _lr_wa
-    RACE_LOCATIONS = {
-        k: {
-            "name": r.get("location_name", r.get("name", k)),
-            "lat":  r["lat"],
-            "lon":  r["lon"],
-            "tz_offset": r.get("tz_offset", 7),
-        }
-        for k, r in _lr_wa(active_only=False)
-        if r.get("lat") and r.get("lon")
-    }
-    if not RACE_LOCATIONS:
-        raise ValueError("empty")
-except Exception:
-    RACE_LOCATIONS = {
-        "bangsaen": {"name": "Bangsaen Beach, Chonburi", "lat": 13.2848, "lon": 100.9222, "tz_offset": 7},
-        "sponsor21": {"name": "พระราม 8 Bridge, Bangkok", "lat": 13.7735, "lon": 100.4893, "tz_offset": 7},
-        "hm":       {"name": "พระราม 8 Bridge, Bangkok", "lat": 13.7735, "lon": 100.4893, "tz_offset": 7},
-        "fuji":     {"name": "Fuji Marathon, Yamanashi, Japan", "lat": 35.3606, "lon": 138.7274, "tz_offset": 9},
-    }
+from race_registry import list_races as _lr_wa  # noqa: E402
+RACE_LOCATIONS = {
+    k: {"name": r.get("location_name", r.get("name", k)), "lat": r["lat"], "lon": r["lon"],
+        "tz_offset": r.get("tz_offset", 7)}
+    for k, r in _lr_wa(active_only=False) if r.get("lat") and r.get("lon")
+}
+
+
+def _loc(race: str) -> dict:
+    """Location from races.json; lat/lon None when the race has none."""
+    return RACE_LOCATIONS.get(race) or {"name": race, "lat": None, "lon": None, "tz_offset": 7}
 
 # ---------------------------------------------------------------------------
 # WBGT — Stull (2011) J.Appl.Meteor.Climatol. 50:2267
@@ -144,8 +107,8 @@ def calc_wbgt(temp_c: float, humidity_pct: float) -> float:
 # ---------------------------------------------------------------------------
 def calc_penalty(temp_c: float, humidity_pct: float,
                  dew_point_c: float, wind_mps: float) -> float:
-    # Base: Ely HM regression (~0.4% per °C above 13°C)
-    base = max(0.0, (temp_c - 13.0) * 0.40)
+    # Base: the shared Ely model (bangkok_climate.ely_penalty_fraction)
+    base = ely_penalty_fraction(temp_c) * 100
 
     # Dew point: when dew > 16°C sweat evaporation drops → extra penalty [coach-derived]
     dp_penalty = max(0.0, (dew_point_c - 16.0) * 0.25)
@@ -241,9 +204,9 @@ def fetch_forecast(lat: float, lon: float) -> list | None:
 # ---------------------------------------------------------------------------
 def forecast_lookahead(race: str, race_time_str: str = "03:30",
                        base_pace_str: str | None = None, days: int = 3):
-    loc = RACE_LOCATIONS.get(race) or RACE_LOCATIONS.get("hm") or _BANGKOK_DEFAULT
+    loc = _loc(race)
     print(f"📡 Fetching 5-day forecast for {loc['name']}...")
-    forecast = fetch_forecast(loc["lat"], loc["lon"])
+    forecast = fetch_forecast(loc["lat"], loc["lon"]) if loc["lat"] is not None else None
     if not forecast:
         print("❌ Forecast unavailable — check OPENWEATHER_API_KEY")
         return
@@ -313,7 +276,7 @@ def parse_pace(pace_str: str) -> float:
 
 
 def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: str | None = None):
-    loc = RACE_LOCATIONS.get(race) or RACE_LOCATIONS.get("hm") or _BANGKOK_DEFAULT
+    loc = _loc(race)
     temp = weather["temp"]
     humidity = weather["humidity"]
     dew = weather["dew"]
@@ -386,18 +349,27 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
     #  produced ~109% over-replacement; now it calls the clamped solver.)
     try:
         from nutrition_calculator import (sweat_rate_lhr, sweat_na_mgl,
-                                          na_requirement, RACE_CONFIG, plan_caps)
+                                          na_requirement, RACE_CONFIG, plan_caps,
+                                          schedule_plan, IN_RACE_SCHEDULE)
         rc = RACE_CONFIG[race]
         duration_min = rc["default_duration_min"]
         sr, _, _ = sweat_rate_lhr(temp, humidity)
         na_loss = sr * duration_min / 60 * sweat_na_mgl()
-        na_min, na_max = na_requirement(sr, duration_min)
-        n_stations = len(rc["stations"])
-        pc = plan_caps(na_loss, na_min, na_max, n_stations)
-        stations_str = ", ".join(f"km {k}" for k in rc["stations"])
-        pre_txt = f"{pc['pre_caps']} แคปก่อนปืน" if pc["pre_caps"] else "ไม่ต้อง preload"
-        prevo_note = (f"Prevo {pre_txt} + รวม {pc['caps_total']} แคป กระจาย {n_stations} station "
-                      f"({stations_str}) = {pc['replace_pct']}% Na replacement [ACSM 40–80%]")
+        _elec = NUTRITION.get('electrolyte_name') or 'Electrolyte'
+        if IN_RACE_SCHEDULE:
+            # athlete's own dosing rule — same plan nutrition_calculator prints
+            sp_ = schedule_plan(rc["dist_km"], na_loss, IN_RACE_SCHEDULE)
+            prevo_note = (f"{_elec} {sp_['n_prevo']} + {NUTRITION.get('gel_name') or 'Gel'} {sp_['n_gel']} "
+                          f"ตามกฎ (ทุก {IN_RACE_SCHEDULE.get('prevo_every_km')}/{IN_RACE_SCHEDULE.get('gel_every_km')} km) "
+                          f"= {sp_['replace_pct']}% Na replacement [ACSM 40–80%]")
+        else:
+            na_min, na_max = na_requirement(sr, duration_min)
+            n_stations = len(rc["stations"])
+            pc = plan_caps(na_loss, na_min, na_max, n_stations)
+            stations_str = ", ".join(f"km {k}" for k in rc["stations"])
+            pre_txt = f"{pc['pre_caps']} แคปก่อนปืน" if pc["pre_caps"] else "ไม่ต้อง preload"
+            prevo_note = (f"{_elec} {pre_txt} + รวม {pc['caps_total']} แคป กระจาย {n_stations} station "
+                          f"({stations_str}) = {pc['replace_pct']}% Na replacement [ACSM 40–80%]")
     except Exception:
         prevo_note = "ดู nutrition_calculator.py สำหรับแผน Na ที่แม่นยำ"
 
@@ -467,7 +439,7 @@ def main():
         forecast_lookahead(args.race, args.time, args.base_pace, days=3)
         return
 
-    loc = RACE_LOCATIONS.get(args.race) or RACE_LOCATIONS.get("hm") or _BANGKOK_DEFAULT
+    loc = _loc(args.race)
 
     if args.manual:
         weather = {
@@ -476,7 +448,7 @@ def main():
         }
     else:
         print(f"📡 Fetching weather for {loc['name']}...")
-        weather = fetch_weather(loc["lat"], loc["lon"])
+        weather = fetch_weather(loc["lat"], loc["lon"]) if loc["lat"] is not None else None
         if weather is None:
             print("⚠️  No API key or fetch failed — using monthly climate averages")
             print("   💡 Add OPENWEATHER_API_KEY to ~/.config/garmin-coach/.env for live data")

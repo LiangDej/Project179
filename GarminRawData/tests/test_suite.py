@@ -169,15 +169,24 @@ def unit_p1_physiology_and_vdot():
     check("vdot_math: VO2max intensities hierarchy E > M > T > I > R",
           pe > pm > pt > pi > pr, f"paces={[pe, pm, pt, pi, pr]}")
 
-    # Treadmill Pace Model
-    paces = [tpm.infer_pace_from_hr(h) for h in (150, 164, 175, 183)]
-    secs  = [int(p.split(":")[0]) * 60 + int(p.split(":")[1].replace("/km", "")) for p in paces]
-    check("treadmill_pace_model: HR↑ → pace faster (monotonic)",
-          all(secs[i] > secs[i + 1] for i in range(len(secs) - 1)), f"secs={secs}")
-    check("treadmill_pace_model: infer_pace handles RHR floor safely",
-          tpm.infer_pace_from_hr(40) is not None)
-    check("treadmill_pace_model: infer_pace handles MHR ceiling safely",
-          tpm.infer_pace_from_hr(205) is not None)
+    # Treadmill Pace Model — anchors are athlete data (lt2_test); test the
+    # interpolation on synthetic anchors so it runs on the example fixtures too.
+    _saved_anchors = tpm.TM_HR_ANCHORS
+    try:
+        tpm.TM_HR_ANCHORS = [(140, 430), (150, 400), (165, 340), (175, 310), (183, 300)]
+        paces = [tpm.infer_pace_from_hr(h) for h in (150, 164, 175, 183)]
+        secs  = [int(p.split(":")[0]) * 60 + int(p.split(":")[1].replace("/km", "")) for p in paces]
+        check("treadmill_pace_model: HR↑ → pace faster (monotonic)",
+              all(secs[i] > secs[i + 1] for i in range(len(secs) - 1)), f"secs={secs}")
+        check("treadmill_pace_model: infer_pace handles RHR floor safely",
+              tpm.infer_pace_from_hr(40) is not None)
+        check("treadmill_pace_model: infer_pace handles MHR ceiling safely",
+              tpm.infer_pace_from_hr(205) is not None)
+        tpm.TM_HR_ANCHORS = []
+        check("treadmill_pace_model: no lt2_test anchors → feature off (None, no guess)",
+              tpm.infer_pace_from_hr(160) is None)
+    finally:
+        tpm.TM_HR_ANCHORS = _saved_anchors
 
 
 # ===========================================================================
@@ -202,12 +211,16 @@ def unit_p2_macro_and_weekly():
     check("session_prescriber: sunday is long run",
           plan["sessions"][6]["weekday"] == "อาทิตย์" and plan["sessions"][6]["type"] == "long")
 
-    # Readiness override: low BB forces quality to easy
-    plan_low = sp.generate_week_plan(week="current", bb=30, hrv="unbalanced", pain="none",
-                                    verbose=False, target_monday=date(2026, 8, 31))
-    check("session_prescriber: low BB modifies quality to easy",
-          all(s["decision"] == "MODIFY" and "Easy" in s["workout"]
-              for s in plan_low["sessions"] if s["type"] in ("quality1", "quality2")))
+    # Readiness override: low BB forces TODAY's quality to easy (v1.8: today's
+    # BB/HRV vote only for today — future days are planned without them)
+    _q_day = next(date(2026, 8, 31) + timedelta(days=i) for i in range(7)
+                  if plan["sessions"][i]["type"] in ("quality1", "quality2"))
+    _low = sp.prescribe_day(_q_day, bb=30, hrv="unbalanced", pain="none", live=True)
+    check("session_prescriber: low BB modifies today's quality to easy",
+          _low["decision"] == "MODIFY" and "Easy" in _low["workout"], str(_low.get("workout")))
+    _fut = sp.prescribe_day(_q_day, bb=30, hrv="unbalanced", pain="none", live=False)
+    check("session_prescriber: today's BB does not downgrade a future day",
+          _fut["decision"] == "GO", _fut.get("reason", ""))
 
     # Training Planner math (pure functions)
     check("training_planner: target_peak_km stretches above historical peak",
@@ -268,9 +281,12 @@ def unit_p3_race_and_nutrition():
           pru.heat_adjusted_duration(3600, 25.0) < 3600)
 
     # Taper Monitor window ordering
-    check("taper_monitor: window thresholds strictly ordered (far > early > late > final)",
-          tm.TAPER_VOLUME["far"]["days_min"] > tm.TAPER_VOLUME["early"]["days_min"]
-          > tm.TAPER_VOLUME["late"]["days_min"] > tm.TAPER_VOLUME["final"]["days_min"])
+    import readiness as _rd
+    check("taper profiles ordered (window ≥ race_week ≥ no_quality, A ≥ B ≥ C)",
+          all(p["window"] >= p["race_week"] >= p["no_quality"] for p in _rd.TAPER_PROFILES.values())
+          and _rd.TAPER_PROFILES["A"]["window"] >= _rd.TAPER_PROFILES["B"]["window"] >= _rd.TAPER_PROFILES["C"]["window"])
+    check("taper_monitor uses the shared taper profile (no own volume table)",
+          not hasattr(tm, "TAPER_VOLUME") and tm._get_taper_window(5, _rd.TAPER_PROFILES["A"])["key"] == "race_week")
 
 
 # ===========================================================================
@@ -351,8 +367,8 @@ def consistency_tests():
 
     # Injury ACWR EWMA invariant
     src = Path(ird.__file__).read_text()
-    check("injury_risk: ACWR uses EWMA ATL/CTL (not raw week km)",
-          "compute_current_pmc" in src and "ACWR" in src)
+    check("injury_risk: ACWR uses EWMA 7/28 (Williams 2017), not ATL/CTL τ42 or raw km",
+          "ewma_acwr" in src and "ACWR" in src)
 
     # Training phases taper alignment
     active_date_str = rr.active_race()["date"]
@@ -624,12 +640,14 @@ def plausibility_tests():
     check("readiness: other triggered reasons are kept", len(ra["others"]) >= 2, str(ra["others"]))
     ra2 = db.readiness_assess(25, "unbalanced", "easy", pain="mild", rhr=rb + 11, rhr_baseline=rb)
     check("readiness: REST beats every MODIFY (HRV unbalanced + BB<30)", ra2["decision"] == "REST")
-    plan = db.build_action_plan({"label": "Long", "note": ""}, "MODIFY", "long", None, None, cap_km=6)
-    check("readiness: MODIFY on a long-run day no longer prints a long run",
-          not any("Long Run\n" in l or l.strip() == "📋 Long Run" for l in plan)
-          and any("ลดระดับจาก Long Run" in l for l in plan), " | ".join(plan))
-    check("readiness: cap_km applied to the plan distance",
-          any("–6.0 km" in l for l in plan), " | ".join(plan))
+    import session_prescriber as _sp
+    _sun = date(2027, 3, 14)   # a Sunday inside a training phase
+    _ld = _sp.prescribe_day(_sun, bb=80, hrv="balanced", pain="none",
+                            rhr=rb + 11, rhr_baseline=rb, live=True)
+    check("readiness: MODIFY on a long-run day prints an easy run, not a long run",
+          _ld["decision"] == "MODIFY" and _ld["label"].startswith("🟡 Easy Run แทน Long Run"), _ld["label"])
+    check("readiness: cap_km applied to the plan distance (RHR +11 → ≤6 km)",
+          _ld["spec"]["km"] <= 6, str(_ld.get("spec")))
     # form_analysis (post-run per-km form + cadence lock) — synthetic stream
     import form_analysis as fa
     def _mk(n_km, hr_fn, cad_fn, gct_fn):
@@ -672,12 +690,14 @@ def v171_tests():
     check("taper: windows shrink with tier (A > B > C)",
           A_["window"] > B_["window"] > C_["window"] and A_["no_quality"] > B_["no_quality"] > C_["no_quality"])
     _day = _d(2026, 1, 6)
+    import readiness as _rd
     def _q(days, prof):
-        return sp._prescribe_day(1, "quality1", "quality", 80, "balanced", "none",
-                                 days, "R", _day, taper_prof=prof)["decision"]
+        return _rd.readiness_assess(80, "balanced", "quality1", "none", days,
+                                    no_quality=days <= prof["no_quality"], planning=True)["decision"]
     check("taper: B-race 5 days out keeps the quality session", _q(5, B_) == "GO")
     check("taper: B-race 3 days out → quality becomes easy", _q(3, B_) == "MODIFY")
-    check("taper: A-race 10 days out → quality becomes easy (unchanged A rule)", _q(10, A_) == "MODIFY")
+    check("taper (v1.8 research): A-race 10 days out KEEPS short quality (Bosquet 2007)", _q(10, A_) == "GO")
+    check("taper (v1.8 research): A-race 4 days out → easy", _q(4, A_) == "MODIFY")
     _saved = sp.RACE_DATES
     try:
         sp.RACE_DATES = [{"name": "C", "date": _d(2026, 1, 11), "tier": "C", "taper_days": None}]
@@ -800,6 +820,137 @@ def v172_tests():
           and "readiness_hrv(cached)" in (Path(db.__file__).parent / "session_prescriber.py").read_text())
 
 
+def _hardcode_hits(tools_dir: Path) -> list:
+    """AST scan of tool code + config for literals that must come from data:
+    HR bpm, pace strings, race names, product brands, date(20xx, …) calls.
+    Docstrings are ignored (they may cite history); comments aren't parsed."""
+    import ast, re
+    files = sorted(tools_dir.glob("*.py")) + [tools_dir.parent.parent / "skills" / "garmin_coach_mcp" / "config.py"]
+    pat = {
+        "hr": re.compile(r"(HR\s*[<≤>]=?\s*1[2-9]\d)|(\b1[3-9]\d\s*bpm)|(HR\s+1[3-9]\d\s*[–-]\s*1[3-9]\d)"),
+        "pace": re.compile(r"^[3-8]:[0-5]\d(/km)?$"),
+        "race": re.compile(r"sponsor21|bangsaen|fuji|osaka|ATM21|Phra Rama", re.I),
+        "product": re.compile(r"Palatinose|BAAM|AminoVital|Amino Vital|Prevo"),
+    }
+    hits = []
+    for f in files:
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        docs = {id(n.body[0].value) for n in ast.walk(tree)
+                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and n.body and isinstance(n.body[0], ast.Expr)
+                and isinstance(getattr(n.body[0], "value", None), ast.Constant)
+                and isinstance(n.body[0].value.value, str)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs:
+                hits += [f"{f.name}:{n.lineno} {k}: {n.value[:50]!r}" for k, rx in pat.items() if rx.search(n.value)]
+            if (isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", None)) == "date"
+                    and n.args and isinstance(n.args[0], ast.Constant)
+                    and isinstance(n.args[0].value, int) and n.args[0].value >= 2020):
+                hits.append(f"{f.name}:{n.lineno} date: {ast.unparse(n)}")
+    return hits
+
+
+def v18_tests():
+    """v1.8 — single sources + JD/sport-science rules + no hardcode."""
+    print("\n── 11. v1.8 SSOT + JD + NO-HARDCODE ─────────────────────")
+    import json as _j
+    from datetime import date as _d, timedelta as _td
+    import config
+    import vdot_math as vm
+    import jd_rules as jd
+    import readiness as rd
+    import training_planner as tp
+    import session_prescriber as sp
+    import training_load as tl
+    import race_pace_planner as rpp
+    import bangkok_climate as bc
+    import weather_adjuster as wa
+    import garmin_workout_pusher as gwp
+    tools = Path(sp.__file__).parent
+    A = config.ATHLETE
+
+    # ── Single sources ──
+    check("paces: VDOT_PACES = vdot_math.jd_paces(vdot) (no hand-typed table)",
+          {k: tuple(v) for k, v in config.VDOT_PACES.items()} == vm.jd_paces(A["vdot"])
+          or bool(config._AJ.get("pace_overrides_sec", {}).keys() - {"_comment"}))
+    check("paces: athlete.json no longer carries vdot_paces_sec", "vdot_paces_sec" not in config._AJ)
+    m_pred = vm.predict_race_time(A["vdot"], 42195) * 60 / 42.195
+    check("paces: JD M pace = VDOT-predicted marathon pace (±tolerance)",
+          config.VDOT_PACES["M"][0] <= m_pred <= config.VDOT_PACES["M"][1])
+    check("zones: E ceiling = JD 79 % HRmax", config.HR_ZONE_BOUNDS["Z1_E"][1] == round(A["mhr"] * 0.79))
+    check("zones: T ceiling = LTHR", config.HR_ZONE_BOUNDS["Z3_T"][1] == int(A["lthr"]))
+    _tpj = _j.loads((Path(config.__file__).resolve().parents[2] / "GarminRawData" / "training_plan.json").read_text())
+    check("plan: season phases come from training_plan.json (data, not config.py)",
+          [p["name"] for p in config.TRAINING_PHASES] == [p["name"] for p in _tpj["phases"]])
+    src_tp = Path(tp.__file__).read_text()
+    check("plan: one week computation (build_plan + get_week_info both call week_plan)",
+          src_tp.count("week_plan(") >= 3 and "def week_plan" in src_tp)
+    src_db = (tools / "daily_brief.py").read_text()
+    check("readiness: daily_brief has no own day-plan engine (uses prescribe_day)",
+          "WEEKLY_PLAN" not in src_db and "def build_action_plan" not in src_db and "prescribe_day(" in src_db)
+    check("readiness: one readiness_assess (defined only in readiness.py)",
+          sum("def readiness_assess" in f.read_text() for f in tools.glob("*.py")) == 1)
+    _code = [f for f in tools.glob("*.py") if f.name != "activity_loader.py"]
+    check("activities: no tool reads running_activities_all.json directly (activity_loader only)",
+          not any('"running_activities_all.json"' in f.read_text() for f in _code))
+    check("load: PMC uses runs + cardio cross-training", "load_load_activities" in Path(tl.__file__).read_text())
+    check("heat: race_pace_planner uses the shared Ely model",
+          rpp._heat_penalty_pct(26) == round(bc.ely_penalty_fraction(26) * 100, 1))
+    check("heat: weather_adjuster base penalty = shared Ely model (+ coach modifiers)",
+          abs(wa.calc_penalty(26, 50, 10, 2) - bc.ely_penalty_fraction(26) * 100) < 0.01)
+    check("climate: one Bangkok table (weather_adjuster imports bangkok_climate)",
+          wa.BANGKOK_CLIMATE is bc.BANGKOK_CLIMATE)
+    import re as _re
+    check("nutrition: no literal product fallbacks in config",
+          not _re.search(r'_NP\.get\("(prevo|aminovital)_\w+",\s*\d', Path(config.__file__).read_text())
+          and config.NUTRITION["prevo_na_mg"] == config._AJ["nutrition_products"]["prevo_na_mg"])
+    check("nutrition: one per-session protocol dict (config.DAY_NUTRITION)",
+          all("NUTRITION = {" not in (tools / f).read_text() for f in ("daily_brief.py", "session_prescriber.py")))
+
+    # ── JD rules ──
+    check("JD: T cap = max(10 % week, 20-min tempo)",
+          jd.quality_cap_km("T", 30, config.VDOT_PACES["T"]) >= 20 * 60 / jd.mid(config.VDOT_PACES["T"]) - 0.05
+          and jd.quality_cap_km("T", 100, config.VDOT_PACES["T"]) == 10.0)
+    check("JD: I cap = min(8 % week, 10 km)", jd.quality_cap_km("I", 50) == 4.0 and jd.quality_cap_km("I", 200) == 10.0)
+    check("JD: R cap = min(5 % week, 8 km)", jd.quality_cap_km("R", 60) == 3.0 and jd.quality_cap_km("R", 200) == 8.0)
+    cap_lo, _ = jd.long_run_cap(40, config.VDOT_PACES["E"])
+    cap_hi, why = jd.long_run_cap(200, config.VDOT_PACES["E"])
+    check("JD: long ≤30 % of a <64 km week", cap_lo == 12.0)
+    check("JD: long ≤150 min whatever the volume", "150" in why and cap_hi * jd.mid(config.VDOT_PACES["E"]) / 60 <= 150.5)
+    r = jd.render_quality({"type": "I", "rep_km": 1.0, "reps": 6, "rest": "400m jog"}, 40,
+                          config.VDOT_PACES, config.HR_ZONE_BOUNDS)
+    check("JD: render caps I reps to the weekly limit (40 km → 3 × 1 km)", r["workout"].startswith("3×") and r["capped"])
+    check("JD: I/R prescribed by pace, HR only as ceiling for T/M", "คุมด้วย pace" in r["workout"])
+    _wq = tp.week_plan(_d(2027, 3, 8))
+    _cap, _ = jd.long_run_cap(_wq["km_target"], config.VDOT_PACES["E"])
+    check("JD: planner never prescribes a long run above the cap (outside taper)",
+          _wq["phase"] == "taper" or _wq["long_km"] <= _cap)
+    check("JD: long-run overshoot warning", jd.check_long_run(32, 210, 46, config.VDOT_PACES["E"]) is not None
+          and jd.check_long_run(12, 75, 46, config.VDOT_PACES["E"]) is None)
+
+    # ── Taper + recovery (research / JD) ──
+    check("taper: A keeps quality until T-5 (Bosquet 2007), easy from T-4", rd.TAPER_PROFILES["A"]["no_quality"] == 4)
+    _races = [{"name": "HM", "date": _d(2027, 3, 13), "dist_km": 21.1}]
+    check("JD recovery: 21 km race → 8 easy days", rd.post_race_recovery(_d(2027, 3, 14), _races) == ("HM", 1, 8)
+          and rd.post_race_recovery(_d(2027, 3, 22), _races) is None)
+    _rv = rd.readiness_assess(80, "balanced", "long", recovery=("HM", 1, 8), planning=True)
+    check("JD recovery: long/quality become easy inside the window", _rv["decision"] == "MODIFY")
+
+    # ── ACWR + cross-training + analyzer ──
+    acwr = tl.ewma_acwr([{"startTimeLocal": (_d.today() - _td(days=i)).isoformat() + " 06:00:00",
+                          "averageHR": 140, "duration": 3600} for i in range(60)])
+    check("ACWR: EWMA 7/28 → steady load ≈ 1.0", acwr[0] is not None and 0.95 <= acwr[0] <= 1.05, str(acwr))
+    check("analyzer: non-running activity → cross-training report, not the run log",
+          "RUN_TYPE_KEYS" in (tools / "post_session_analyzer.py").read_text())
+    check("pusher: builds quality from the session spec (no regex on text)",
+          "build_from_spec" in Path(gwp.__file__).read_text() and gwp.PACE["T"][1] == jd.fmt_pace(config.VDOT_PACES["T"][0]))
+
+    # ── No hardcode ──
+    hits = _hardcode_hits(tools)
+    check("no-hardcode: tools + config contain no literal HR/pace/race/product/date values",
+          not hits, " | ".join(hits[:5]))
+
+
 def main():
     _require_athlete_data()
     print("=" * 60)
@@ -831,6 +982,7 @@ def main():
     plausibility_tests()
     v171_tests()
     v172_tests()
+    v18_tests()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
     total  = len(_RESULTS)

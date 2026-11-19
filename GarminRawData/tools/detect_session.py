@@ -7,7 +7,7 @@ Used by run_post_run.sh to auto-route to the correct post-run pipeline.
 
 Detection logic (priority order):
   1. sessions_master already has this activity_id with quality type → quality
-  2. max HR ≥ T_HR_LO (170bpm) AND quality zone time > 10min → quality
+  2. max HR ≥ T_HR_LO (T-zone low, config) AND quality zone time > 10min → quality
   3. avg HR < 84% HRR AND distance ≥ LONG_RUN_KM → long
   4. else → easy
 
@@ -29,7 +29,6 @@ import sys
 from pathlib import Path
 
 BASE_DIR    = Path(__file__).parent.parent
-DATA_FILE   = BASE_DIR / "running_activities_all.json"
 MASTER_JSON = BASE_DIR / "QualitySessionLog" / "sessions_master.json"
 COACH_MCP   = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
 sys.path.insert(0, str(COACH_MCP))
@@ -39,7 +38,7 @@ from config import ATHLETE, HR_ZONE_BOUNDS  # noqa: E402
 RHR         = ATHLETE["rhr"]
 MHR         = ATHLETE["mhr"]
 HRR         = MHR - RHR
-T_HR_LO     = HR_ZONE_BOUNDS["Z3_T"][0]   # 170 bpm — Threshold zone low
+T_HR_LO     = HR_ZONE_BOUNDS["Z3_T"][0]   # Threshold zone low (config)
 LONG_RUN_KM = 14.0                         # ≥ this km = long run candidate
 QUALITY_ZONE_MIN = 10.0                    # ≥ 10 min in Z3+Z4+Z5 = quality effort
 
@@ -67,11 +66,8 @@ def _load_master_types() -> dict:
 
 
 def _load_activity(activity_id: str | None) -> dict | None:
-    if not DATA_FILE.exists():
-        return None
-    with open(DATA_FILE, encoding="utf-8") as f:
-        data = json.load(f)
-    activities = data if isinstance(data, list) else data.get("activities", [])
+    from activity_loader import load_activities_merged
+    activities = load_activities_merged()
     if not activities:
         return None
     if activity_id:

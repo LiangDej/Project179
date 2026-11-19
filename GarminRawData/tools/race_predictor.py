@@ -40,8 +40,25 @@ from vdot_math import compute_vdot, predict_race_time    # noqa: E402
 RHR = ATHLETE["rhr"]
 MHR = ATHLETE["mhr"]
 HRR = ATHLETE["hrr"]
-T_HR_LO, T_HR_HI = HR_ZONE_BOUNDS["Z3_T"]   # 174–183 (LTHR 183-anchored)
-I_HR_LO, I_HR_HI = HR_ZONE_BOUNDS["Z4_I"]   # 176–187
+T_HR_LO, T_HR_HI = HR_ZONE_BOUNDS["Z3_T"]   # T zone, ceiling = LTHR (config)
+I_HR_LO, I_HR_HI = HR_ZONE_BOUNDS["Z4_I"]   # I zone (config)
+
+def _fmt_goal(minutes: float) -> str:
+    h, m = divmod(int(round(minutes)), 60)
+    return f"Sub {h}:{m:02d}"
+
+
+def _goals_from_race(race: dict) -> dict:
+    """Goal tiers from races.json (goal_tiers {A,B,..} minutes, else goal_min
+    as A). v1.8: B used to be hardcoded Sub 1:55 / Sub 4:15."""
+    tiers = {k: v for k, v in (race.get("goal_tiers") or {}).items() if v}
+    if not tiers and race.get("goal_min"):
+        tiers = {"A": race["goal_min"]}
+    out = {k: {"label": _fmt_goal(float(v)), "minutes": float(v)} for k, v in sorted(tiers.items())}
+    if "A" in out and race.get("goal_label"):
+        out["A"]["label"] = race["goal_label"].split("|")[0].replace("A:", "").strip() or out["A"]["label"]
+    return out
+
 
 # Goal definitions — loaded from races.json via race_registry (single source of truth)
 try:
@@ -58,28 +75,13 @@ try:
         ((k, r) for k, r in _upcoming if r.get("dist_km", 0) >= 40), (None, {}))
     _hm_key, _hm_race = next(
         ((k, r) for k, r in _upcoming if 15 <= r.get("dist_km", 0) < 40), (None, {}))
-    HM_GOALS = {
-        "A": {"label": _hm_race.get("goal_label", "Sub 1:50"),
-              "minutes": float(_hm_race.get("goal_min", 110.0))},
-        "B": {"label": "Sub 1:55", "minutes": 115.0},
-    }
-    FM_GOALS = {
-        "A": {"label": _fm_race.get("goal_label", "Sub 4:00"),
-              "minutes": float(_fm_race.get("goal_min", 240.0))},
-        "B": {"label": "Sub 4:15", "minutes": 255.0},
-    }
+    HM_GOALS = _goals_from_race(_hm_race)
+    FM_GOALS = _goals_from_race(_fm_race)
     _FM_RACE_NAME = _fm_race.get("short", _fm_race.get("name", "no upcoming FM"))
     _FM_RACE_DATE = _fm_race.get("date", "—")[:7]
     _HM_RACE_NAME = _hm_race.get("short", _hm_race.get("name", "no upcoming HM"))
 except Exception:
-    HM_GOALS = {
-        "A": {"label": "Sub 1:50", "minutes": 110.0},
-        "B": {"label": "Sub 1:55", "minutes": 115.0},
-    }
-    FM_GOALS = {
-        "A": {"label": "Sub 4:00", "minutes": 240.0},
-        "B": {"label": "Sub 4:15", "minutes": 255.0},
-    }
+    HM_GOALS, FM_GOALS = {}, {}
     _FM_RACE_NAME = "FM Race"
     _FM_RACE_DATE = "—"
     _HM_RACE_NAME = "HM Race"
@@ -164,7 +166,7 @@ def estimate_vdot_from_session(s: dict, quality_hr_avg: float | None = None) -> 
         # If HR < T zone lower bound → effort below threshold → cannot estimate
         if hr < T_HR_LO:
             return None
-        t_mid      = (T_HR_LO + T_HR_HI) / 2   # ~173 bpm
+        t_mid      = (T_HR_LO + T_HR_HI) / 2
         hr_deficit = t_mid - hr                  # >0 = running below T-zone mid
         # Each bpm below T-zone mid → ~0.5 VDOT uplift (conservative)
         base_vdot  = ATHLETE["vdot"]

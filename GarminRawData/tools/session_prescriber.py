@@ -34,177 +34,34 @@ COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
 
-from config import (ATHLETE, VDOT_PACES, PHASE_PRESCRIPTIONS,  # noqa: E402
-                    HR_ZONE_BOUNDS, get_current_phase)
-try:
-    from training_planner import get_week_info  # noqa: E402
-except ImportError:
-    get_week_info = None  # graceful fallback if training_planner unavailable
+from config import (ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS,  # noqa: E402
+                    DAY_NUTRITION, render_prescription)
+from jd_rules import render_quality, render_long, fmt_pace  # noqa: E402
+from readiness import (TAPER_PROFILES, taper_profile,  # noqa: E402,F401
+                       active_races, active_taper, readiness_assess, post_race_recovery)
+from training_planner import week_plan  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# Race Registry (sync with taper_monitor.py)
-# ---------------------------------------------------------------------------
-# SINGLE SOURCE: races.json via race_registry (active races only).
-try:
-    from race_registry import list_races
-    RACE_DATES = [{"name": r["name"], "date": date.fromisoformat(r["date"]),
-                   "tier": r.get("tier", "A"), "taper_days": r.get("taper_days")}
-                  for _, r in list_races(active_only=True)
-                  if r.get("tier") != "template"]
-except Exception:
-    RACE_DATES = [{"name": "🏁 Bangsaen42 Chonburi Marathon", "date": date(2026, 11, 15),
-                   "tier": "A", "taper_days": None}]
+# Races: races.json via race_registry — no fallback race (v1.8: the old
+# fallback pointed at Bangsaen42 15 Nov 2026 and would taper a dead race).
+RACE_DATES = active_races()
+ALL_RACES = active_races(active_only=False)   # incl. finished ones (post-race recovery)
 
-# ---------------------------------------------------------------------------
-# Taper profiles by race tier (v1.7.1)
-# Before v1.7.1 EVERY race got the A-race taper (14-day window, no quality
-# ≤10 d, long ≤12 km) — a B tune-up or C race wiped out two weeks of quality.
-# Mujika & Padilla 2003: full taper 8–14 d for goal races; tune-ups use a
-# short mini-taper so the main build isn't interrupted.
-#   window      days before race where taper rules start
-#   no_quality  quality sessions become easy at ≤ this many days
-#   race_week   ≤ this many days = "Race Week" (bigger volume cut)
-#   long_cap    max long-run km inside the window
-# Per-race override: races.json → "taper_days" replaces `window`.
-# ---------------------------------------------------------------------------
-TAPER_PROFILES = {
-    "A": {"window": 14, "no_quality": 10, "race_week": 7, "long_cap": 12,
-          "vol_early": "30%", "vol_race": "50%"},
-    "B": {"window": 7,  "no_quality": 3,  "race_week": 3, "long_cap": 14,
-          "vol_early": "20%", "vol_race": "40%"},
-    "C": {"window": 3,  "no_quality": 2,  "race_week": 2, "long_cap": 10,
-          "vol_early": "0%",  "vol_race": "20%"},
-}
+WEEKDAY_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
+DEFAULT_STRIDES = 6
+MIN_EASY_KM = 3
+_ROUTINES = {"strength": ATHLETE.get("strength_routine") or "Strength ตามโปรแกรม",
+             "mobility": ATHLETE.get("mobility_routine") or "Mobility + Stretching"}
 
 
-def taper_profile(race: dict) -> dict:
-    """Taper rules for a race entry (tier-based, optional taper_days override)."""
-    prof = dict(TAPER_PROFILES.get(race.get("tier") or "A", TAPER_PROFILES["A"]))
-    if race.get("taper_days"):
-        prof["window"] = int(race["taper_days"])
-    return prof
-
-# Hard constraints
-WEEKLY_STRUCTURE = {
-    0: {"day": "จันทร์",    "type": "strength",     "fixed": True},
-    1: {"day": "อังคาร",   "type": "quality1",     "fixed": False},
-    2: {"day": "พุธ",      "type": "easy",          "fixed": False},
-    3: {"day": "พฤหัสบดี", "type": "quality2",     "fixed": False},
-    4: {"day": "ศุกร์",    "type": "rest",          "fixed": True},   # HARD — ห้ามซ้อม
-    5: {"day": "เสาร์",    "type": "easy+strides",  "fixed": False},
-    6: {"day": "อาทิตย์",  "type": "long",          "fixed": False},
-}
-
-# Nutrition protocols — loaded from athlete.json (single source of truth)
-try:
-    import json as _json_sp
-    _aj_sp = _json_sp.loads((BASE_DIR / "athlete.json").read_text(encoding="utf-8"))
-    _q  = _aj_sp.get("quality_nutrition", {})
-    _l  = _aj_sp.get("long_run_nutrition", {}).get("outdoor", {})
-    _rd = _aj_sp.get("race_day_nutrition", {})
-    _q_pre60  = _q.get("pre_60min",   "Palatinose 20g")
-    _q_pre15  = _q.get("pre_15min",   "Prevo 1 cap")
-    _l_pre60  = _l.get("pre_60min",   "Palatinose 30g")
-    _l_pre15  = _l.get("pre_15min",   "Prevo 1 cap")
-    _rd_pre150 = _rd.get("pre_150min", "Palatinose 25g")
-    _rd_pre30  = _rd.get("pre_30min",  "Gel + Prevo 2 แคป")
-    _rd_in     = _rd.get("in_race",    "ตาม km plan")
-except Exception:
-    _q_pre60, _q_pre15   = "Palatinose 20g", "Prevo 1 cap"
-    _l_pre60, _l_pre15   = "Palatinose 30g", "Prevo 1 cap"
-    _rd_pre150, _rd_pre30, _rd_in = "Palatinose 25g", "Gel + Prevo 2 แคป", "ตาม km plan"
-
-NUTRITION = {
-    "quality1":     f"☕ กาแฟดำ + {_q_pre60} (T-60) → 💊 {_q_pre15} + น้ำ 150ml (T-15)",
-    "quality2":     f"☕ กาแฟดำ + {_q_pre60} (T-60) → 💊 {_q_pre15} + น้ำ 150ml (T-15)",
-    "easy":         "☕ กาแฟดำ เท่านั้น",
-    "easy+strides": "☕ กาแฟดำ เท่านั้น",
-    "long":         f"☕ กาแฟดำ + {_l_pre60} (T-60) → 💊 {_l_pre15} + น้ำ 150ml (T-15)",
-    "strength":     "โปรตีน 20-30g หลังซ้อม",
-    "rest":         "น้ำเปล่า 2.5L ตลอดวัน",
-}
-_RACE_DAY_NUT = f"{_rd_pre150} (T-2.5hr) → {_rd_pre30} (T-30min) → {_rd_in}"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def _fmt_pace(sec_km: int) -> str:
-    m, s = divmod(sec_km, 60)
-    return f"{m}:{s:02d}/km"
-
-
-def _progressive_long_km(phase_info: dict, monday: date) -> int:
-    """
-    Linear interpolation: long_km_start → long_km (peak) across the phase.
-    Deload weeks (every 4th week within a phase) get ~75% of that week's value.
-    Taper phase counts DOWN (start=high → peak=low) to reflect volume reduction.
-    Returns nearest even integer (clean distances: 16, 18, 20…).
-    """
-    if not phase_info:
-        return PHASE_PRESCRIPTIONS.get("quality", {}).get("long_km", 20)
-
-    prescription = PHASE_PRESCRIPTIONS.get(phase_info["phase"], {})
-    long_start   = prescription.get("long_km_start")
-    long_peak    = prescription.get("long_km", 16)
-
-    # No progression defined → use fixed peak
-    if long_start is None or long_start == long_peak:
-        return long_peak
-
-    phase_start  = phase_info["start"]
-    phase_end    = phase_info["end"]
-    total_weeks  = max(1, round((phase_end - phase_start).days / 7))
-    week_num     = max(0, (monday - phase_start).days // 7)  # 0-indexed
-
-    # Linear interpolation t: 0.0 (week 1) → 1.0 (last week) — clamped to [0,1]
-    t = min(1.0, week_num / max(1, total_weeks - 1))
-    raw = long_start + (long_peak - long_start) * t
-
-    # Deload every 4th week within the phase (week_num 3, 7, 11…) → 75%
-    # Skip deload logic for taper phase — volume reduction is already built-in
-    is_deload = (week_num + 1) % 4 == 0 and phase_info["phase"] != "taper"
-    if is_deload:
-        raw *= 0.75
-
-    # Round to nearest 2km for clean prescription
-    return max(8, round(raw / 2) * 2)
-
-
-def _days_to_nearest_race(from_date: date) -> tuple[str | None, int | None]:
-    future = [(r["name"], (r["date"] - from_date).days)
-              for r in RACE_DATES if r["date"] >= from_date]
-    if not future:
-        return None, None
-    name, days = min(future, key=lambda x: x[1])
-    return name, days
-
-
-def _active_taper(on_date: date) -> tuple[str | None, int | None, dict | None]:
-    """Nearest race whose OWN tier window covers on_date → (name, days, profile).
-
-    A C-race 5 days out is outside its 3-day window, so it does not taper the
-    day; an A-race 12 days out is inside its 14-day window, so it does.
-    """
-    live = []
-    for r in RACE_DATES:
-        days = (r["date"] - on_date).days
-        if days < 0:
-            continue
-        prof = taper_profile(r)
-        if days <= prof["window"]:
-            live.append((days, r["name"], prof))
-    if not live:
-        return None, None, None
-    days, name, prof = min(live, key=lambda x: x[0])
-    return name, days, prof
+def _active_taper(on_date: date):
+    """(name, days, profile) of the race whose tier window covers on_date."""
+    return active_taper(on_date, RACE_DATES)
 
 
 def _get_health_from_cache() -> dict:
     try:
         from garmin_client import _load_health_cache
-        today_str = date.today().strftime("%Y-%m-%d")
-        cached = _load_health_cache(today_str)
+        cached = _load_health_cache(date.today().strftime("%Y-%m-%d"))
         if cached:
             return cached
     except Exception:
@@ -212,247 +69,160 @@ def _get_health_from_cache() -> dict:
     return {}
 
 
-def _prescribe_day(weekday: int, day_type: str, phase_key: str,
-                   bb: int | None, hrv: str, pain: str,
-                   taper_days: int | None, taper_name: str | None,
-                   target_date: date,
-                   long_km_override: int | None = None,
-                   easy_km_override: int | None = None,
-                   taper_prof: dict | None = None) -> dict:
-    """สร้าง prescription สำหรับ 1 วัน"""
-    tp = taper_prof or TAPER_PROFILES["A"]
-    in_taper = taper_days is not None and taper_days <= tp["window"]
-    no_quality = in_taper and taper_days <= tp["no_quality"]
+def _easy_text(km: float, e_ceil: int) -> str:
+    e = VDOT_PACES["E"]
+    return f"Easy {km:g}km | Pace {fmt_pace(e[0])}–{fmt_pace(e[1])}/km | HR < {e_ceil}"
 
-    prescription = PHASE_PRESCRIPTIONS.get(phase_key, PHASE_PRESCRIPTIONS["quality"])
-    ep_lo = _fmt_pace(VDOT_PACES["E"][0])
-    ep_hi = _fmt_pace(VDOT_PACES["E"][1])
-    e_ceil = HR_ZONE_BOUNDS["Z1_E"][1]   # Easy HR ceiling — single source (config, LTHR-anchored)
 
-    # --- Overrides based on readiness ---
-    decision = "GO"
-    override_type = None
+def prescribe_day(target_date: date, wi: dict | None = None, bb=None, hrv: str = "unknown",
+                  pain: str = "none", rhr=None, rhr_baseline=None, live: bool = False) -> dict:
+    """The ONE day prescription (weekly plan AND daily brief use it).
 
-    if day_type == "rest":
-        decision = "REST"
+    wi    : week_plan() of the week (phase, volume, JD-capped long/quality).
+    live  : True only for TODAY — today's BB/HRV/RHR then vote; future days
+            are planned from pain + taper rules alone.
+    """
+    monday = target_date - timedelta(days=target_date.weekday())
+    wi = wi or week_plan(monday)
+    wd = target_date.weekday()
+    day_type = wi["structure"][wd]
+    e_ceil = HR_ZONE_BOUNDS["Z1_E"][1]
+    base = {"date": target_date.isoformat(), "weekday": WEEKDAY_TH[wd], "type": day_type}
+
+    race_today = next((r for r in RACE_DATES if r["date"] == target_date), None)
+    if race_today:
+        return {**base, "type": "race", "decision": "RACE", "reason": "",
+                "label": f"🏁 RACE DAY — {race_today['name']}",
+                "workout": "ออกตาม race plan — ไม่มีซ้อม",
+                "note": "Warm-up 10 นาที + strides 2–3 ครั้ง ก่อน gun",
+                "nutrition": DAY_NUTRITION["race"], "others": []}
+
+    t_name, t_days, tp = _active_taper(target_date)
+    in_taper = t_days is not None
+    no_q = in_taper and t_days <= tp["no_quality"]
+    ra = readiness_assess(bb, hrv, day_type, pain, t_days, rhr, rhr_baseline,
+                          no_quality=no_q, planning=not live,
+                          recovery=post_race_recovery(target_date, ALL_RACES))
+    s = {**base, "decision": ra["decision"], "reason": ra["reason"], "others": ra["others"]}
+    presc = wi["prescription"]
+    weekly = wi["km_target"]
+    cut = 0.0
+    # Taper cut only when the race window sits inside a TRAINING phase; a
+    # taper phase's weekly_km in training_plan.json is already the cut volume.
+    if in_taper and wi["phase"] != "taper":
+        cut = float((tp["vol_race"] if t_days <= tp["race_week"] else tp["vol_early"]).rstrip("%")) / 100
+    easy_km = max(MIN_EASY_KM, round(wi["easy_km"] * (1 - cut)))
+
+    if ra["decision"] == "REST":
+        s.update(label="🛌 REST" if day_type == "rest" else "🔴 REST (readiness)",
+                 workout="พักผ่อน 100% ห้ามซ้อมเด็ดขาด", nutrition=DAY_NUTRITION["rest"])
     elif day_type == "strength":
-        if bb is not None and bb < 30:
-            decision = "MODIFY"
-            override_type = "mobility_only"
-    elif day_type in ("quality1", "quality2"):
-        # Taper: no quality inside the tier's no-quality window
-        if no_quality:
-            decision = "MODIFY"
-            override_type = "easy"
-        elif hrv.lower() == "unbalanced":
-            decision = "MODIFY"
-            override_type = "easy"
-        elif pain in ("mild", "moderate"):
-            decision = "MODIFY"
-            override_type = "easy"
-        elif bb is not None and bb < 40:
-            decision = "MODIFY"
-            override_type = "easy"
-    elif day_type == "long":
-        if pain in ("mild", "moderate"):
-            decision = "MODIFY"
-            override_type = "easy"
-
-    # --- Build session detail ---
-    session = {
-        "date":    target_date.isoformat(),
-        "weekday": WEEKLY_STRUCTURE[weekday]["day"],
-        "type":    day_type,
-        "decision": decision,
-    }
-
-    if decision == "REST":
-        session["label"]      = "🛌 REST DAY"
-        session["workout"]    = "พักผ่อน 100% ห้ามซ้อมเด็ดขาด"
-        session["nutrition"]  = NUTRITION["rest"]
-
-    elif day_type == "strength":
-        if override_type == "mobility_only":
-            session["label"]   = "🟡 Mobility Only (BB ต่ำ)"
-            session["workout"] = "Foam Roll 10min + Hip Mobility + Stretching"
+        if ra["decision"] == "MODIFY":
+            s.update(label="🟡 Mobility Only (BB ต่ำ)", workout=_ROUTINES["mobility"])
         else:
-            session["label"]   = "🏋️ Strength & Conditioning"
-            session["workout"] = "Squat 3×10 | RDL 3×10 | TKE 3×15 | Hip Thrust 3×12"
-            _pain = ATHLETE.get("pain_status", "none")
-            session["note"] = (f"เน้น Form ป้องกันบาดเจ็บ (pain_status: {_pain}) — ไม่ใช่ Heavy Weight"
-                                if _pain and _pain != "none"
-                                else "เน้น Form ที่ถูกต้อง — ไม่ใช่ Heavy Weight")
-        session["nutrition"]   = NUTRITION["strength"]
-
-    elif day_type in ("quality1", "quality2") and override_type == "easy":
-        reason = ""
-        if no_quality:
-            reason = f"(Taper T-{taper_days})"
-        elif hrv.lower() == "unbalanced":
-            reason = "(HRV Unbalanced)"
-        elif pain in ("mild", "moderate"):
-            reason = f"(Pain: {pain})"
-        elif bb is not None and bb < 40:
-            reason = f"(BB ต่ำ: {bb})"
-
-        session["label"]      = f"🟡 Easy Run แทน Quality {reason}"
-        session["workout"]    = f"Easy 6km | Pace {ep_lo}–{ep_hi} | HR < {e_ceil}"
-        session["nutrition"]  = NUTRITION["easy"]
-
+            s.update(label="🏋️ Strength & Conditioning", workout=_ROUTINES["strength"],
+                     note=(f"เน้น Form ป้องกันบาดเจ็บ (pain_status: {pain}) — ไม่ใช่ Heavy Weight"
+                           if pain != "none" else "เน้น Form ที่ถูกต้อง — ไม่ใช่ Heavy Weight"))
+        s["nutrition"] = DAY_NUTRITION["strength"]
+    elif ra["decision"] == "MODIFY":
+        hi = min(ra["cap_km"] or easy_km, easy_km if day_type != "long" else max(easy_km, 8))
+        km = max(MIN_EASY_KM, hi)
+        src = {"quality1": "Quality", "quality2": "Quality", "long": "Long Run"}.get(day_type, "Easy")
+        s.update(label=f"🟡 Easy Run แทน {src}", workout=_easy_text(km, e_ceil),
+                 spec={"type": "easy", "km": km}, downgraded=True, nutrition=DAY_NUTRITION["easy"])
     elif day_type in ("quality1", "quality2"):
-        p = prescription.get(day_type, prescription.get("quality1", {}))
-        session["label"]      = f"🔥 Quality Run — {p.get('type', 'T')}"
-        session["workout"]    = p.get("workout", "")
-        session["note"]       = p.get("note", "")
-        session["nutrition"]  = NUTRITION[day_type]
-
+        spec = (presc.get(day_type) or {}).get("spec")
+        if in_taper:
+            # Taper keeps intensity (Bosquet 2007): Q1 = short maintenance T, Q2 = easy.
+            tps = render_prescription("taper", weekly_km=weekly)
+            spec = (tps.get("quality1") or {}).get("spec") if day_type == "quality1" else {"type": "easy", "km": easy_km}
+        if not spec:
+            spec = {"type": "easy", "km": easy_km}
+        r = render_quality(spec, weekly, VDOT_PACES, HR_ZONE_BOUNDS)
+        final = dict(spec)
+        if r["capped"] and spec.get("reps") and spec.get("type") != "combo":
+            final["reps"] = int(r["workout"].split("×")[0])
+        s.update(label=("🔥 Quality — " + r["type"]) if r["type"] not in ("easy",) else "🟢 Easy Run",
+                 workout=r["workout"], note=r.get("note", ""), spec=final,
+                 jd_notes=r["capped"], quality_km=r["quality_km"],
+                 nutrition=DAY_NUTRITION[day_type if r["type"] != "easy" else "easy"])
     elif day_type == "easy":
-        if in_taper:
-            dist = 6
-        else:
-            dist = easy_km_override if easy_km_override else 8
-        session["label"]      = "🟢 Easy Run"
-        session["workout"]    = f"Easy {dist}km | Pace {ep_lo}–{ep_hi} | HR < {e_ceil}"
-        session["nutrition"]  = NUTRITION["easy"]
-
+        s.update(label="🟢 Easy Run", workout=_easy_text(easy_km, e_ceil),
+                 spec={"type": "easy", "km": easy_km}, nutrition=DAY_NUTRITION["easy"])
     elif day_type == "easy+strides":
-        if in_taper:
-            dist = 6
-        else:
-            dist = easy_km_override if easy_km_override else 8
-        session["label"]      = "🟢 Easy + Strides"
-        session["workout"]    = f"{dist}km @ {ep_lo}–{ep_hi} Easy + 6×Strides (เร่ง 20วิ R-effort)"
-        session["note"]       = "Strides: ค่อยๆ เร่ง 15วิ แล้วผ่อน — ไม่ใช่ sprint"
-        session["nutrition"]  = NUTRITION["easy+strides"]
-
+        r = render_quality({"type": "E+strides", "km": easy_km, "strides": DEFAULT_STRIDES},
+                           weekly, VDOT_PACES, HR_ZONE_BOUNDS)
+        s.update(label="🟢 Easy + Strides", workout=r["workout"],
+                 note="Strides: ค่อยๆ เร่ง 15วิ แล้วผ่อน — ไม่ใช่ sprint",
+                 spec={"type": "E+strides", "km": easy_km, "strides": DEFAULT_STRIDES},
+                 nutrition=DAY_NUTRITION["easy+strides"])
     elif day_type == "long":
-        if override_type == "easy":
-            session["label"]   = f"🟡 Easy Run แทน Long Run (Pain: {pain})"
-            session["workout"] = f"Easy 8km | Pace {ep_lo}–{ep_hi} | HR < {e_ceil}"
-            session["nutrition"] = NUTRITION["easy"]
-        else:
-            p         = prescription
-            long_note = p.get("long_note", f"E-Pace | HR < {e_ceil}")
-            # Progressive long run — use override computed per-week, fall back to config peak
-            long_km = long_km_override if long_km_override else p.get("long_km", 16)
-            # Taper: hard cap within 14 days of race
-            if in_taper:
-                long_km = min(long_km, tp["long_cap"])
-            session["label"]      = "📏 Long Run"
-            session["workout"]    = f"{long_km}km — {long_note}"
-            session["nutrition"]  = NUTRITION["long"]
+        km = wi["long_km"]
+        if in_taper:
+            km = min(km, tp["long_cap"])
+        s.update(label="📏 Long Run", workout=render_long(presc.get("long_spec", {}), km, VDOT_PACES, HR_ZONE_BOUNDS),
+                 spec={"type": "long", "km": km,
+                       "m_finish_km": (presc.get("long_spec") or {}).get("m_finish_km", 0)},
+                 jd_notes=[wi["long_capped"]] if wi.get("long_capped") and not in_taper else [],
+                 nutrition=DAY_NUTRITION["long"])
 
-    # Taper note
     if in_taper and day_type not in ("rest", "strength"):
-        race_wk = taper_days <= tp["race_week"]
-        session["taper_note"] = (
-            f"⚡ TAPER T-{taper_days} ({'Race Week' if race_wk else 'Early Taper'}) — "
-            f"ลด volume {tp['vol_race'] if race_wk else tp['vol_early']} ของ peak week"
-        )
-
-    return session
+        race_wk = t_days <= tp["race_week"]
+        s["taper_note"] = (f"⚡ TAPER T-{t_days} ({'Race Week' if race_wk else 'Early Taper'}) — "
+                           f"ลด volume {tp['vol_race'] if race_wk else tp['vol_early']} ของ peak week, คงความหนัก")
+    return s
 
 
 # ---------------------------------------------------------------------------
 # Main planner
 # ---------------------------------------------------------------------------
 def generate_week_plan(week: str, bb: int | None, hrv: str,
-                       pain: str, verbose: bool,
-                       target_monday: date | None = None) -> dict:
+                       pain: str, verbose: bool = False,
+                       target_monday: date | None = None,
+                       rhr=None, rhr_baseline=None) -> dict:
     today = date.today()
-
     if target_monday is not None:
-        monday = target_monday  # explicit override — used by multi-week views
+        monday = target_monday
     elif week == "current":
         monday = today - timedelta(days=today.weekday())
-    else:  # "next" (default)
-        days_ahead = 7 - today.weekday()
-        monday = today + timedelta(days=days_ahead)
-
+    else:
+        monday = today + timedelta(days=7 - today.weekday())
     sunday = monday + timedelta(days=6)
-    phase_info = get_current_phase(monday)
-    phase_key  = phase_info["phase"] if phase_info else "quality"
 
-    # Week-level taper banner: any day of this week inside a race's tier window
+    wi = week_plan(monday)
+    phase_info = wi["phase_info"]
+
     taper_name_display = taper_days_display = None
     for _d in range(7):
         _n, _days, _p = _active_taper(monday + timedelta(days=_d))
         if _n:
-            taper_name_display = _n
-            taper_days_display = _days + _d   # expressed from Monday
+            taper_name_display, taper_days_display = _n, _days + _d
             break
 
-    # ── Link to 30-week long-term plan ────────────────────────────────────────
-    week_info = get_week_info(monday) if get_week_info else {}
-    km_target        = week_info.get("km_target", 0)
-    is_deload        = week_info.get("is_deload", False)
-    week_num         = week_info.get("week_num", "?")
-    total_weeks      = week_info.get("total_weeks", 30)
-    days_to_race     = week_info.get("days_to_race", None)
-    easy_km_for_week = week_info.get("easy_km", 8)
-
-    # Progressive long run — computed from config phase progression
-    long_km_this_week = _progressive_long_km(phase_info, monday)
-
-    sessions = []
-    for wd in range(7):
-        target_date = monday + timedelta(days=wd)
-        day_type    = WEEKLY_STRUCTURE[wd]["type"]
-
-        # Race day override — แสดง RACE DAY แทน workout ปกติ
-        race_today = next((r for r in RACE_DATES if r["date"] == target_date), None)
-        if race_today:
-            sessions.append({
-                "date":      target_date.isoformat(),
-                "weekday":   WEEKLY_STRUCTURE[wd]["day"],
-                "type":      "race",
-                "decision":  "RACE",
-                "label":     f"🏁 RACE DAY — {race_today['name']}",
-                "workout":   "ออกตาม race plan — ไม่มีซ้อม",
-                "note":      "Warm-up 10 นาที + strides 2–3 ครั้ง ก่อน gun",
-                "nutrition": _RACE_DAY_NUT,
-            })
-            continue
-
-        # Taper evaluated PER DAY (was Monday-based for the whole week, so a
-        # Thursday quality 10 days out was still prescribed in an A taper).
-        d_name, d_days, d_prof = _active_taper(target_date)
-        session = _prescribe_day(
-            wd, day_type, phase_key,
-            bb, hrv, pain,
-            d_days, d_name,
-            target_date,
-            long_km_override=long_km_this_week,
-            easy_km_override=easy_km_for_week,
-            taper_prof=d_prof,
-        )
-        sessions.append(session)
+    sessions = [prescribe_day(monday + timedelta(days=d), wi, bb, hrv, pain, rhr, rhr_baseline,
+                              live=(monday + timedelta(days=d) == today)) for d in range(7)]
 
     return {
         "generated_for": f"{monday.isoformat()} – {sunday.isoformat()}",
         "week":          week,
-        "phase":         phase_info["name"] if phase_info else "Unknown",
-        "phase_key":     phase_key,
-        "focus":         PHASE_PRESCRIPTIONS.get(phase_key, {}).get("focus", ""),
-        "readiness": {
-            "bb":    bb,
-            "hrv":   hrv,
-            "pain":  pain,
-        },
+        "phase":         phase_info["name"] if phase_info else wi["phase"],
+        "phase_key":     wi["phase"],
+        "focus":         wi["prescription"].get("focus", ""),
+        "readiness":     {"bb": bb, "hrv": hrv, "pain": pain},
         "taper": {
-            "active":      taper_days_display is not None,
-            "race_name":   taper_name_display,
+            "active":       taper_days_display is not None,
+            "race_name":    taper_name_display,
             "days_to_race": taper_days_display,
         },
-        # ── Long-term plan context (linked from training_planner) ──
         "season": {
-            "week_num":     week_num,
-            "total_weeks":  total_weeks,
-            "km_target":    km_target,
-            "is_deload":    is_deload,
-            "days_to_race": days_to_race,
-            "race_name":    week_info.get("race_name"),
-            "long_run_km":  long_km_this_week,
+            "week_num":     wi["week_num"],
+            "total_weeks":  wi["total_weeks"],
+            "km_target":    wi["km_target"],
+            "is_deload":    wi["is_deload"],
+            "days_to_race": wi["days_to_race"],
+            "race_name":    wi.get("race_name"),
+            "long_run_km":  wi["long_km"],
+            "long_capped":  wi.get("long_capped"),
         },
         "sessions": sessions,
     }
@@ -472,7 +242,7 @@ def print_plan(plan: dict):
         race_tag   = f"  |  🏁 T-{s['days_to_race']}d {s.get('race_name','A-race')}" if s.get("days_to_race") else ""
         print(f"   Season: Week {s['week_num']}/{s['total_weeks']} "
               f"| Target {s.get('km_target','?')}km "
-              f"| Long {s.get('long_run_km','?')}km"
+              f"| Long {s.get('long_run_km','?')}km{' (JD cap)' if s.get('long_capped') else ''}"
               f"{deload_tag}{race_tag}")
 
     if plan['taper']['active']:
@@ -489,6 +259,10 @@ def print_plan(plan: dict):
             print(f"   🏃 {s['workout']}")
         if s.get('note'):
             print(f"   📝 {s['note']}")
+        if s.get('decision') == "MODIFY" and s.get('reason'):
+            print(f"   ↳ {s['reason']}")
+        for n in s.get('jd_notes') or []:
+            print(f"   ✂️  {n}")
         if s.get('taper_note'):
             print(f"   {s['taper_note']}")
         if s.get('nutrition'):
@@ -507,7 +281,7 @@ def main():
                         help="สัปดาห์ที่ต้องการวางแผน (default: next)")
     parser.add_argument("--bb",    type=int, help="Body Battery วันนี้")
     parser.add_argument("--hrv",   default="unknown",
-                        choices=["balanced", "unbalanced", "unknown"],
+                        choices=["balanced", "unbalanced", "high", "unknown"],
                         help="HRV status วันนี้")
     parser.add_argument("--pain",  default=ATHLETE.get("pain_status", "none"),
                         choices=["none", "mild", "moderate"],
@@ -533,7 +307,14 @@ def main():
             from hrv_trend import readiness_hrv
             hrv = readiness_hrv(cached)
 
-    plan = generate_week_plan(args.week, bb, hrv, args.pain, args.verbose)
+    rhr = rhr_b = None
+    try:
+        from hrv_trend import rhr_baseline as _rhr_baseline
+        rhr = _get_health_from_cache().get("resting_hr")
+        rhr_b = _rhr_baseline() or ATHLETE.get("rhr")
+    except Exception:
+        pass
+    plan = generate_week_plan(args.week, bb, hrv, args.pain, args.verbose, rhr=rhr, rhr_baseline=rhr_b)
 
     if args.json:
         print(json.dumps(plan, ensure_ascii=False, indent=2))

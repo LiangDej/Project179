@@ -3,7 +3,8 @@ config.py — Single source of truth for athlete constants and training phases.
 
 All tools (server.py, daily_brief.py, post_session_analyzer.py, weekly_load_report.py,
 training_load.py, race_predictor.py) import from here.
-To update after a race (new VDOT) or phase change, edit only this file.
+Edit DATA, not this file: athlete.json (athlete), races.json (races),
+training_plan.json (season phases + workout specs). This module only derives.
 """
 from datetime import date, timedelta
 import json as _json
@@ -19,331 +20,209 @@ _ATHLETE_JSON = _Path(__file__).resolve().parent.parent.parent / "GarminRawData"
 
 
 def _load_athlete_json() -> dict:
-    try:
-        return _json.loads(_ATHLETE_JSON.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    """athlete.json, else athlete.example.json (fresh clone) — never literals here."""
+    for f in (_ATHLETE_JSON, _ATHLETE_JSON.with_name("athlete.example.json")):
+        try:
+            return _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    return {}
 
 
 _AJ = _load_athlete_json()
 
 ATHLETE = {
     "name":       _AJ.get("name", "Athlete"),
-    "rhr":        _AJ.get("rhr", 44),
-    "mhr":        _AJ.get("mhr", 195),
-    "vdot":       _AJ.get("vdot", 40),     # race/TT confirmed ONLY (not Garmin VO2max)
-    "weight_kg":  _AJ.get("weight_kg", 71.6),
-    "vdot_source":            _AJ.get("vdot_source", "tt_outdoor_park_jun26"),
-    "vdot_calibration_date":  _AJ.get("vdot_calibration_date", "2026-06-01"),
-    "vdot_calibration":       _AJ.get("vdot_calibration", "heat_adj_only"),
-    "vdot_heat_adj_estimate": _AJ.get("vdot_heat_adj_estimate", 40.6),
-    "tt_scheduled":           _AJ.get("tt_scheduled", "tm_lt2_done_2026-06-09"),
-    "lthr":                   _AJ.get("lthr", 183),    # Friel 30-min TM test 2026-06-09
-    "lthr_date":              _AJ.get("lthr_date", "2026-06-09"),
-    "lthr_confidence":        _AJ.get("lthr_confidence", "MODERATE"),
+    "rhr":        _AJ["rhr"],
+    "mhr":        _AJ["mhr"],
+    "vdot":       _AJ["vdot"],              # race/TT confirmed ONLY (not Garmin VO2max)
+    "weight_kg":  _AJ.get("weight_kg"),
+    "vdot_source":            _AJ.get("vdot_source"),
+    "vdot_calibration_date":  _AJ.get("vdot_calibration_date"),
+    "vdot_calibration":       _AJ.get("vdot_calibration"),
+    "vdot_heat_adj_estimate": _AJ.get("vdot_heat_adj_estimate"),
+    "tt_scheduled":           _AJ.get("tt_scheduled"),
+    "lthr":                   _AJ["lthr"],
+    "lthr_date":              _AJ.get("lthr_date"),
+    "lthr_confidence":        _AJ.get("lthr_confidence"),
     "pain_status":            _AJ.get("pain_status", "none"),  # none|mild|moderate — persisted injury state
-    # Personal marathon-endurance factor: actual FM time / Daniels VDOT-predicted
-    # FM time. Pure VDOT assumes full marathon-specific endurance; for this
-    # athlete it under-predicts by ~17% (Osaka 2026 cool, Bangsaen 2026 heat-adj).
+    # Personal marathon-endurance factor: actual FM / VDOT-predicted FM.
     # 1.0 = no adjustment. Recalibrate after every marathon.
     "fm_endurance_factor":    float(_AJ.get("fm_endurance_factor", 1.0)),
     # Standing athlete preferences the coach must not violate (printed in daily brief)
     "coaching_constraints":   list(_AJ.get("coaching_constraints", [])),
+    # Measured treadmill speed↔HR points (LT2 test) — treadmill_pace_model
+    "lt2_test":               _AJ.get("lt2_test", {}),
 }
 ATHLETE["hrr"] = ATHLETE["mhr"] - ATHLETE["rhr"]   # derived
 
 # ---------------------------------------------------------------------------
-# HR Zones — %HRR (Karvonen) boundaries from athlete.json, LTHR-anchored so
-# T-ceiling = LTHR. (E 0.79→163, M 0.862→174, T 0.921→183=LTHR, I 0.95→187)
+# Shared pure helpers live in GarminRawData/tools (vdot_math = JD formulas,
+# jd_rules = JD limits + workout rendering) — imported, never duplicated here.
 # ---------------------------------------------------------------------------
-_ZP  = dict(_AJ.get("hr_zone_hrr_pct", {"E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95}))
-_rhr = ATHLETE["rhr"]
-_hrr = ATHLETE["hrr"]
-_mhr = ATHLETE["mhr"]
-
-# T-ceiling is defined to equal LTHR (T-pace == threshold == LTHR by
-# definition) — auto-derive hr_zone_hrr_pct["T"] from the athlete's actual
-# LTHR/RHR/HRR instead of requiring someone to hand-tune a 3-decimal ratio
-# in athlete.json until it happens to satisfy that equation. This removes an
-# onboarding footgun: a new athlete who fills in their own LTHR/RHR/MHR but
-# leaves hr_zone_hrr_pct at the example file's default gets a T-zone that
-# doesn't match their real LTHR at all.
-if _hrr > 0:
-    _ZP["T"] = (ATHLETE["lthr"] - _rhr) / _hrr
-
-HR_ZONES = [
-    ("Z1 Easy",       _rhr,                          _rhr + int(_hrr * _ZP["E"])),
-    ("Z2 Marathon",   _rhr + int(_hrr * _ZP["E"]),   _rhr + int(_hrr * _ZP["M"])),
-    ("Z3 Threshold",  _rhr + int(_hrr * _ZP["M"]),   _rhr + int(_hrr * _ZP["T"])),
-    ("Z4 Interval",   _rhr + int(_hrr * _ZP["T"]),   _rhr + int(_hrr * _ZP["I"])),
-    ("Z5 Repetition", _rhr + int(_hrr * _ZP["I"]),   _mhr),
-]
-
-HR_ZONE_BOUNDS = {
-    "Z1_E": (_rhr,                        _rhr + int(_hrr * _ZP["E"])),
-    "Z2_M": (_rhr + int(_hrr * _ZP["E"]), _rhr + int(_hrr * _ZP["M"])),
-    "Z3_T": (_rhr + int(_hrr * _ZP["M"]), _rhr + int(_hrr * _ZP["T"])),
-    "Z4_I": (_rhr + int(_hrr * _ZP["T"]), _rhr + int(_hrr * _ZP["I"])),
-    "Z5_R": (_rhr + int(_hrr * _ZP["I"]), _mhr),
-}
-
-# Zone classification thresholds (% of HRR) — derived from the same %HRR source.
-# A run is zone X if its %HRR < ZONE_PCT[X]; anything >= "I" is Repetition.
-ZONE_PCT = {k: round(v * 100) for k, v in _ZP.items()}
+import sys as _sys
+_TOOLS_DIR = _Path(__file__).resolve().parent.parent.parent / "GarminRawData" / "tools"
+if str(_TOOLS_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_TOOLS_DIR))
+from vdot_math import jd_paces as _jd_paces          # noqa: E402
+from jd_rules import (JD_E_MAX_PCT_HRMAX,            # noqa: E402
+                      render_quality as _render_quality, render_long as _render_long)
 
 # ---------------------------------------------------------------------------
-# VDOT Training Paces (sec/km, lo=faster hi=slower) — from athlete.json.
-# Derived for current VDOT; edit vdot_paces_sec in athlete.json after a TT.
+# HR Zones (v1.8)
+#   E ceiling = JD 79 % HRmax (was %HRR 0.79 → 163 = Friel, not JD → 154)
+#   M / I     = %HRR from athlete.json hr_zone_hrr_pct
+#   T ceiling = LTHR (measured), by definition
 # ---------------------------------------------------------------------------
-_VP = _AJ.get("vdot_paces_sec", {
-    "E": [337, 404], "M": [316, 325], "T": [300, 310], "I": [271, 280], "R": [260, 270],
-})
-VDOT_PACES = {k: tuple(v) for k, v in _VP.items()}
+_ZP_DEFAULT = {"M": 0.862, "I": 0.95}
 
-# Nutrition product sodium (mg) — from athlete.json (used by nutrition_calculator).
-_NP = _AJ.get("nutrition_products", {"prevo_na_mg": 650, "aminovital_na_mg": 90})
+
+def _build_zones(rhr: int, mhr: int, lthr: float, zp: dict) -> dict:
+    hrr = mhr - rhr
+    e_hi = int(round(mhr * JD_E_MAX_PCT_HRMAX))
+    m_hi = rhr + int(hrr * zp.get("M", _ZP_DEFAULT["M"]))
+    t_hi = int(lthr)
+    i_hi = rhr + int(hrr * zp.get("I", _ZP_DEFAULT["I"]))
+    return {"Z1_E": (rhr, e_hi), "Z2_M": (e_hi, m_hi), "Z3_T": (m_hi, t_hi),
+            "Z4_I": (t_hi, i_hi), "Z5_R": (i_hi, mhr)}
+
+
+def _zone_list(b: dict) -> list:
+    names = [("Z1 Easy", "Z1_E"), ("Z2 Marathon", "Z2_M"), ("Z3 Threshold", "Z3_T"),
+             ("Z4 Interval", "Z4_I"), ("Z5 Repetition", "Z5_R")]
+    return [(n, *b[k]) for n, k in names]
+
+
+def _zone_pct(b: dict, rhr: int, hrr: int) -> dict:
+    """%HRR upper bound per zone (classification thresholds)."""
+    return {k: round((b[z][1] - rhr) / hrr * 100) for k, z in
+            (("E", "Z1_E"), ("M", "Z2_M"), ("T", "Z3_T"), ("I", "Z4_I"))}
+
+
+HR_ZONE_BOUNDS = _build_zones(ATHLETE["rhr"], ATHLETE["mhr"], ATHLETE["lthr"],
+                              _AJ.get("hr_zone_hrr_pct", {}))
+HR_ZONES = _zone_list(HR_ZONE_BOUNDS)
+ZONE_PCT = _zone_pct(HR_ZONE_BOUNDS, ATHLETE["rhr"], ATHLETE["hrr"])
+
+# ---------------------------------------------------------------------------
+# VDOT Training Paces (sec/km, fast, slow) — DERIVED from VDOT (vdot_math).
+# athlete.json → pace_overrides_sec {zone: [fast, slow]} only if you must.
+# ---------------------------------------------------------------------------
+VDOT_PACES = _jd_paces(ATHLETE["vdot"])
+VDOT_PACES.update({k: tuple(v) for k, v in _AJ.get("pace_overrides_sec", {}).items()
+                   if not k.startswith("_")})
+
+# ---------------------------------------------------------------------------
+# Nutrition — product numbers + per-session protocol, all from athlete.json.
+# No product fallbacks: a missing value is None and the tool asks for it
+# (the old 650/90 fallbacks were the pre-2026-08-02 WRONG label reading).
+# ---------------------------------------------------------------------------
+_NP = _AJ.get("nutrition_products", {})
 NUTRITION = {
-    "prevo_na_mg":      _NP.get("prevo_na_mg", 650),
-    "aminovital_na_mg": _NP.get("aminovital_na_mg", 90),
-    "aminovital_carb_g": _NP.get("aminovital_carb_g", 26),
-    # Athlete's fixed in-race dosing rule (athlete.json → race_day_nutrition.
-    # in_race_schedule). None = fall back to the per-station solver.
+    "prevo_na_mg":      _NP.get("prevo_na_mg"),
+    "aminovital_na_mg": _NP.get("aminovital_na_mg"),
+    "aminovital_carb_g": _NP.get("aminovital_carb_g"),
+    "sweat_na_mmol":    _AJ.get("sweat_na_mmol", 45.0),   # Shirreffs & Maughan mid-range
+    "electrolyte_name": _NP.get("electrolyte_name", "Electrolyte cap"),
+    "gel_name":         _NP.get("gel_name", "Gel"),
     "in_race_schedule": _AJ.get("race_day_nutrition", {}).get("in_race_schedule"),
 }
 
+
+def _day_nutrition() -> dict:
+    q = _AJ.get("quality_nutrition", {})
+    lo = _AJ.get("long_run_nutrition", {}).get("outdoor", {})
+    rd = _AJ.get("race_day_nutrition", {})
+    sn = _AJ.get("session_nutrition", {})
+    pre = sn.get("pre_base", "")
+
+    def _fuel(d):
+        if not d:
+            return pre or "-"
+        return f"{pre + ' + ' if pre else ''}{d.get('pre_60min', '')} (T-60) → {d.get('pre_15min', '')} (T-15)"
+    out = {
+        "quality1": _fuel(q), "quality2": _fuel(q), "long": _fuel(lo),
+        "easy": sn.get("easy", pre or "-"), "easy+strides": sn.get("easy", pre or "-"),
+        "strength": sn.get("strength", "-"), "rest": sn.get("rest", "-"),
+        "post_run": sn.get("post_run", "-"), "carb_load": sn.get("carb_load", "-"),
+        "race": (f"{rd.get('pre_150min', '')} (T-2.5hr) → {rd.get('pre_30min', '')} (T-30min) → "
+                 f"{rd.get('in_race', '')}") if rd else "-",
+    }
+    return out
+
+
+DAY_NUTRITION = _day_nutrition()
+
 # ---------------------------------------------------------------------------
-# Quality-run baselines for post-session grading
+# Form/quality grading baselines — personal values in athlete.json →
+# form_baselines; the numbers here are generic defaults only.
 # ---------------------------------------------------------------------------
 BASELINES = {
-    "cadence_min":       164,   # spm (double) — min acceptable
-    "gct_max":           275,   # ms  — max acceptable at T-pace
-    "gct_treadmill_add":  20,   # ms  — allowance for treadmill
-    "decoupling_good":     5,   # %   — below = green
-    "decoupling_warn":    10,   # %   — above = red
-    "stamina_drain_max":  50,   # %   — drain > 50% = very hard
-    "vr_good":           8.5,   # %   Vertical Ratio target
-    "vr_warn":           9.5,   # %   Vertical Ratio warning
-    "power_min":         238,   # W
-    "power_max":         265,   # W
+    "cadence_min":       164,
+    "grade_cadence_s":   155,   # cadence floor for an S grade
+    "grade_cadence_a":   153,   # cadence floor for an A grade
+    "gct_max":           275,
+    "gct_treadmill_add":  20,
+    "decoupling_good":     5,   # Friel Pa:HR — <5 % = aerobically fit
+    "decoupling_warn":    10,
+    "stamina_drain_max":  50,
+    "vr_good":           8.5,
+    "vr_warn":           9.5,
+    "power_min":         None,
+    "power_max":         None,
 }
+BASELINES.update({k: v for k, v in _AJ.get("form_baselines", {}).items() if not k.startswith("_")})
 
 # ---------------------------------------------------------------------------
-# Training Phases (May–Dec 2026, อิงจาก Mileage Plan)
+# Season plan — GarminRawData/training_plan.json (SINGLE SOURCE, editable data)
+# Falls back to training_plan.example.json for a fresh clone.
+# Workouts are SPECS: reps/pace/HR are rendered from VDOT_PACES + zones and
+# capped by JD per-session limits when the planner knows the weekly volume.
 # ---------------------------------------------------------------------------
-TRAINING_PHASES = [
-    {
-        "name":       "Recovery + Phra Rama 8",
-        "start":      date(2026, 5, 1),
-        "end":        date(2026, 5, 17),
-        "phase":      "taper",
-        "km_target":  148,
-    },
-    {
-        "name":       "Base Building I",
-        "start":      date(2026, 5, 18),
-        "end":        date(2026, 7, 31),
-        "phase":      "base",
-        "km_target":  160,
-    },
-    {
-        "name":       "Base Building II",
-        "start":      date(2026, 8, 1),
-        "end":        date(2026, 8, 9),
-        "phase":      "base",
-        "km_target":  180,
-    },
-    {
-        # Quality I start moved up to match MASTER_PLAN_2026.md Section 5
-        # (revised 2026-07-01): Quality phase begins Aug 10, not Sep 1 — the
-        # 3-week lag here was the bug (session_prescriber was still handing
-        # out Base-phase-only T work with no Interval component in what
-        # should already be Quality phase). End date (Sep 27) left as-is —
-        # config.py's Sep–Nov phase structure has since diverged from the
-        # master-plan doc in ways beyond just dates (different phase names/
-        # boundaries around Sponsor21); that needs a deliberate reconciliation
-        # pass, not a silent date edit, so it's flagged separately rather than
-        # changed here. LR 30km สัปดาห์ที่ 3, deload สัปดาห์ที่ 4.
-        "name":       "Quality I",
-        "start":      date(2026, 8, 10),
-        "end":        date(2026, 9, 27),
-        "phase":      "quality",
-        "km_target":  190,
-    },
-    {
-        # JD B-race prep: ลด volume 30% เฉพาะ 7 วันสุดท้ายก่อน Sponsor21 HM — ไม่ full taper
-        "name":       "Pre-Sponsor21 Race Week",
-        "start":      date(2026, 9, 28),
-        "end":        date(2026, 10, 3),
-        "phase":      "taper",
-        "km_target":  140,
-    },
-    {
-        # Oct 4 = Sponsor21 HM race | Oct 5-14 = easy recovery | Oct 15-17 = gentle quality return
-        "name":       "Sponsor21 + Recovery",
-        "start":      date(2026, 10, 4),
-        "end":        date(2026, 10, 17),
-        "phase":      "quality",
-        "km_target":  100,
-    },
-    {
-        # JD Peak Block: LR #1 Oct 18 (30km) + LR #2 Oct 25 (32km) = 2× ≥30km ก่อน taper
-        "name":       "Race Specific (Peak)",
-        "start":      date(2026, 10, 18),
-        "end":        date(2026, 11, 1),
-        "phase":      "race_specific",
-        "km_target":  200,
-    },
-    {
-        # A-RACE = Bangsaen42 Marathon 15 พ.ย. → 2-week taper ends race day
-        "name":       "Taper + Bangsaen42",
-        "start":      date(2026, 11, 2),
-        "end":        date(2026, 11, 15),
-        "phase":      "taper",
-        "km_target":  120,
-    },
-    {
-        # ATM21 HM 28 พ.ย. — easy finish 13 days after Bangsaen42
-        "name":       "Recovery + ATM21",
-        "start":      date(2026, 11, 16),
-        "end":        date(2026, 11, 28),
-        "phase":      "taper",
-        "km_target":  50,
-    },
-    {
-        "name":       "Post-race Recovery (off-season)",
-        # day after ATM21 — written as +1 day so the zombie-date guard
-        # (old archived ATM FM date 2026-11-29) doesn't false-positive.
-        # Gate to leave: knee pain-free 14 d, RHR back at baseline, HRV balanced.
-        "start":      date(2026, 11, 28) + timedelta(days=1),
-        "end":        date(2026, 12, 13),
-        "phase":      "taper",
-        "km_target":  60,
-    },
-    # ── 2027 SEASON — goal Sub-4 FM (races.json → sub4_2027, date = PLACEHOLDER) ──
-    # Agreed 2026-11-18. Diagnosis: sub-4 is limited by endurance factor (1.17),
-    # not VDOT — at VDOT 40 a factor of ~1.05 already gives ~4:01. So the season
-    # prioritises volume + 30–32 km long runs + fuelling rehearsal over speed.
-    # Phases after Feb are PROVISIONAL: re-anchor to the real race date once
-    # chosen (Tokyo lotto 20 Nov / Berlin 3 Dec) — keep taper ending on race day.
-    {
-        # Volume rebuild 30→50 km/wk (≤10 %/wk, deload every 4th), LR 14→22 km E,
-        # strides + hill sprints, knee strength per physio. Chest strap.
-        # Exit checkpoint (late Feb): LTHR retest w/ chest strap + 5K TT → VDOT.
-        "name":       "2027 Base Rebuild",
-        "start":      date(2026, 12, 14),
-        "end":        date(2027, 2, 28),
-        "phase":      "base",
-        "km_target":  180,
-    },
-    {
-        # T + I (not consecutive), 50–60 km/wk, LR 24–26 km. Target VDOT ≥42 (TT/race).
-        "name":       "2027 Quality Development",
-        "start":      date(2027, 3, 1),
-        "end":        date(2027, 5, 2),
-        "phase":      "quality",
-        "km_target":  220,
-    },
-    {
-        # Marathon build: LR to 30 km, M-pace finishes, fuelling every long run.
-        "name":       "2027 Marathon Build (provisional)",
-        "start":      date(2027, 5, 3),
-        "end":        date(2027, 8, 1),
-        "phase":      "quality",
-        "km_target":  250,
-    },
-    {
-        # ≥3 long runs 30–32 km (the missing piece in 2026), M-pace 8–12 km tails,
-        # 60–70 km/wk peak. Target endurance factor ≤1.10.
-        "name":       "2027 Race Specific (provisional)",
-        "start":      date(2027, 8, 2),
-        "end":        date(2027, 9, 12),
-        "phase":      "race_specific",
-        "km_target":  270,
-    },
-    {
-        "name":       "2027 Taper (provisional)",
-        "start":      date(2027, 9, 13),
-        "end":        date(2027, 9, 26),
-        "phase":      "taper",
-        "km_target":  120,
-    },
-]
+_GRD = _Path(__file__).resolve().parent.parent.parent / "GarminRawData"
 
-# ---------------------------------------------------------------------------
-# Phase-aware session prescriptions
-# quality1 = Tuesday default, quality2 = Thursday default
-# ---------------------------------------------------------------------------
-PHASE_PRESCRIPTIONS = {
-    "base": {
-        "focus":      "สร้าง Aerobic Base — Volume เป็นหลัก ยังไม่เน้น Intensity",
-        "quality1":   {
-            "type":    "T",
-            "workout": "3×10min @ T-pace | HR 174–183 | rec 2min",
-            "note":    "Threshold volume — เน้น duration ไม่ใช่ intensity",
-        },
-        "quality2":   {
-            "type":    "E+strides",
-            "workout": "10km E-pace + 6×Strides (เร่ง 20วิ R-effort)",
-            "note":    "Base phase — ยังไม่ใช้ Interval เปลี่ยนเป็น Easy+Strides",
-        },
-        "long_km_start": 16,   # wk 1 ของ phase (FM: ค่อยๆ build)
-        "long_km":       24,   # peak ของ phase
-        "long_note":  "100% E-pace | HR < 163",
-        "quality_max": 1,
-    },
-    "quality": {
-        "focus":      "เพิ่ม VO2max และ Lactate Threshold — 2 Quality ต่อสัปดาห์",
-        "quality1":   {
-            "type":    "T",
-            "workout": "5×8min @ T-pace | HR 174–183 | rec 90วิ",
-            "note":    "Threshold intervals — lactate clearance",
-        },
-        "quality2":   {
-            "type":    "I",
-            "workout": "5×1km @ I-pace | HR 183–187 | rec 400m E-pace",
-            "note":    "VO2max stimulus — สำคัญที่สุดใน Quality Phase",
-        },
-        "long_km_start": 26,   # wk 1 ของ phase
-        "long_km":       30,   # peak ของ phase (FM: ต้องถึง 30km ก่อน taper)
-        "long_note":  "75% E-pace + 25% M-pace ช่วงท้าย 5km",
-        "quality_max": 2,
-    },
-    "race_specific": {
-        "focus":      "จำลองสภาพการแข่งสนามไทย — Race-pace conditioning",
-        "quality1":   {
-            "type":    "T",
-            "workout": "3×3km @ T-pace continuous | HR 174–183 | rec 3min",
-            "note":    "Cruise intervals — T-pace ต่อเนื่องระยะยาวขึ้น",
-        },
-        "quality2":   {
-            "type":    "I+M",
-            "workout": "3×1km @ I-pace + 5km @ M-pace | HR mixed",
-            "note":    "Speed + race endurance — จำลอง race day",
-        },
-        "long_km_start": 30,   # JD: 2 ครั้ง ≥30km (Week 1 Oct 18 + Week 2 Oct 25)
-        "long_km":       32,   # peak ของ phase (FM: 2 ครั้ง 30km+ ก่อน taper)
-        "long_note":  "60% E-pace + 40% M-pace ช่วงท้าย 8km",
-        "quality_max": 2,
-    },
-    "taper": {
-        "focus":      "รักษา Sharpness ลด Volume — เน้นพักฟื้นก่อนแข่ง",
-        "quality1":   {
-            "type":    "T",
-            "workout": "2×10min @ T-pace | HR 174–183 | Volume ลด 40%",
-            "note":    "Maintenance quality — รักษา sharpness",
-        },
-        "quality2":   {
-            "type":    "easy",
-            "workout": "Easy 6km only | HR < 163",
-            "note":    "Taper — quality2 ลดเป็น easy run",
-        },
-        "long_km_start": 22,   # wk 1 ของ taper (ลดจาก race_specific peak)
-        "long_km":       12,   # peak (ลดลงเรื่อยๆ จนถึง race)
-        "long_note":  "ถ้า ≥ 14 วันก่อนแข่ง: Easy only | HR < 163 | ไม่เพิ่ม stress\n"
-                      "ถ้า 7–14 วันก่อนแข่ง (Dress Rehearsal): 5km Easy + 7km @ Race Pace (HM: 11.2 km/h = Sub 1:53 / 11.5 km/h = Sub 1:50) | HR ceiling 174 bpm | ลด 1% incline | เช็ก HR นิ่งก่อนขึ้น Race Pace",
-        "quality_max": 1,
-    },
-}
+
+def _load_plan() -> dict:
+    for f in (_GRD / "training_plan.json", _GRD / "training_plan.example.json"):
+        try:
+            return _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    return {"phases": [], "prescriptions": {}}
+
+
+def _phase(p: dict) -> dict:
+    d = dict(p)
+    d["start"] = date.fromisoformat(str(p["start"]))
+    d["end"] = date.fromisoformat(str(p["end"]))
+    return d
+
+
+def render_prescription(phase_key: str, weekly_km=None, presc_map=None) -> dict:
+    """Phase prescription with workouts rendered (and JD-capped if weekly_km)."""
+    src = (presc_map or _PLAN.get("prescriptions", {})).get(phase_key) or {}
+    if "quality1" in src and isinstance(src["quality1"], dict) and "workout" in src["quality1"] \
+            and "type" in src["quality1"] and "reps" not in src["quality1"] and "km" not in src["quality1"] \
+            and "parts" not in src["quality1"]:
+        return src   # legacy text prescription (DB profile) — pass through
+    out = {"focus": src.get("focus", ""), "quality_max": src.get("quality_max", 1)}
+    for slot in ("quality1", "quality2"):
+        spec = src.get(slot)
+        if spec:
+            r = _render_quality(spec, weekly_km, VDOT_PACES, HR_ZONE_BOUNDS)
+            r["spec"] = spec
+            out[slot] = r
+    lg = src.get("long", {})
+    out["long_spec"] = lg
+    out["long_km_start"] = lg.get("start_km")
+    out["long_km"] = lg.get("peak_km", 16)
+    out["long_note"] = _render_long(lg, out["long_km"], VDOT_PACES, HR_ZONE_BOUNDS)
+    return out
+
+
+_PLAN = _load_plan()
+TRAINING_PHASES = [_phase(p) for p in _PLAN.get("phases", [])]
+PHASE_PRESCRIPTIONS = {k: render_prescription(k) for k in _PLAN.get("prescriptions", {})}
 
 
 def get_current_phase(target_date=None):
@@ -353,38 +232,6 @@ def get_current_phase(target_date=None):
         if phase["start"] <= d <= phase["end"]:
             return phase
     return None
-
-
-def calculate_paces_from_vdot(vdot: float) -> dict:
-    """Calculate Jack Daniels training paces in seconds/km for a given VDOT."""
-    import math
-    def calculate_pace_sec(intensity_factor):
-        vo2_target = vdot * intensity_factor
-        a = 0.000104
-        b = 0.182258
-        c = -4.60 - vo2_target
-        discriminant = b**2 - 4*a*c
-        if discriminant < 0:
-            return 0
-        velocity_m_min = (-b + math.sqrt(discriminant)) / (2*a)
-        if velocity_m_min <= 0:
-            return 0
-        pace_sec_km = (1000 / velocity_m_min) * 60
-        return int(round(pace_sec_km))
-
-    # Calibrated Jack Daniels intensity factors matching standard tables
-    factors = {
-        "E": (0.779, 0.620),
-        "M": (0.845, 0.814),
-        "T": (0.899, 0.864),
-        "I": (1.023, 0.980),
-        "R": (1.075, 1.028)
-    }
-    
-    return {
-        key: (calculate_pace_sec(f_fast), calculate_pace_sec(f_slow))
-        for key, (f_fast, f_slow) in factors.items()
-    }
 
 
 def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> bool:
@@ -401,7 +248,6 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
     if config_dir not in sys.path:
         sys.path.insert(0, config_dir)
         
-    global HR_ZONES, TRAINING_PHASES, PHASE_PRESCRIPTIONS
     
     # Resolve anon_user_id from LINE ID if needed
     if not anon_user_id and line_user_id:
@@ -446,42 +292,14 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
     athlete_updates["hrr"] = athlete_updates["mhr"] - athlete_updates["rhr"]
     ATHLETE.update(athlete_updates)
 
-    # Recalculate HR Zones based on new RHR / MHR / LTHR
-    _rhr = ATHLETE["rhr"]
-    _hrr = ATHLETE["hrr"]
-    _mhr = ATHLETE["mhr"]
+    # Recalculate zones + paces with the same helpers as the static path
+    _b = _build_zones(ATHLETE["rhr"], ATHLETE["mhr"], ATHLETE["lthr"],
+                      profile.get("hr_zone_hrr_pct", {}))
+    HR_ZONE_BOUNDS.clear(); HR_ZONE_BOUNDS.update(_b)
+    HR_ZONES.clear(); HR_ZONES.extend(_zone_list(_b))
+    ZONE_PCT.clear(); ZONE_PCT.update(_zone_pct(_b, ATHLETE["rhr"], ATHLETE["hrr"]))
+    VDOT_PACES.clear(); VDOT_PACES.update(_jd_paces(ATHLETE["vdot"]))
 
-    # %HRR zone ratios — use the profile's own hr_zone_hrr_pct if given,
-    # otherwise the same defaults as the static (single-user) path above.
-    _zp = dict(profile.get("hr_zone_hrr_pct", {"E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95}))
-    # T-ceiling is defined to equal LTHR by definition — auto-derive it from
-    # this athlete's own LTHR instead of trusting a hardcoded 0.921 ratio,
-    # same reasoning as the module-level derivation above (see line ~57).
-    if _hrr > 0:
-        _zp["T"] = (ATHLETE["lthr"] - _rhr) / _hrr
-
-    new_hr_zones = [
-        ("Z1 Easy",       _rhr,                        _rhr + int(_hrr * _zp["E"])),
-        ("Z2 Marathon",   _rhr + int(_hrr * _zp["E"]), _rhr + int(_hrr * _zp["M"])),
-        ("Z3 Threshold",  _rhr + int(_hrr * _zp["M"]), _rhr + int(_hrr * _zp["T"])),
-        ("Z4 Interval",   _rhr + int(_hrr * _zp["T"]), _rhr + int(_hrr * _zp["I"])),
-        ("Z5 Repetition", _rhr + int(_hrr * _zp["I"]), _mhr),
-    ]
-    HR_ZONES.clear()
-    HR_ZONES.extend(new_hr_zones)
-
-    HR_ZONE_BOUNDS.update({
-        "Z1_E": (_rhr,                        _rhr + int(_hrr * _zp["E"])),
-        "Z2_M": (_rhr + int(_hrr * _zp["E"]), _rhr + int(_hrr * _zp["M"])),
-        "Z3_T": (_rhr + int(_hrr * _zp["M"]), _rhr + int(_hrr * _zp["T"])),
-        "Z4_I": (_rhr + int(_hrr * _zp["T"]), _rhr + int(_hrr * _zp["I"])),
-        "Z5_R": (_rhr + int(_hrr * _zp["I"]), _mhr),
-    })
-    
-    # Recalculate paces mathematically from new VDOT
-    new_paces = calculate_paces_from_vdot(ATHLETE["vdot"])
-    VDOT_PACES.update(new_paces)
-    
     # Load custom baselines if present
     if "baselines" in profile:
         BASELINES.update(profile["baselines"])
@@ -489,11 +307,13 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
     # Load custom training phases if present
     if "training_phases" in profile:
         TRAINING_PHASES.clear()
-        TRAINING_PHASES.extend(profile["training_phases"])
+        TRAINING_PHASES.extend(_phase(p) if isinstance(p.get("start"), str) else p
+                               for p in profile["training_phases"])
         
     # Load custom phase prescriptions if present
     if "phase_prescriptions" in profile:
-        PHASE_PRESCRIPTIONS.update(profile["phase_prescriptions"])
+        _pp = profile["phase_prescriptions"]
+        PHASE_PRESCRIPTIONS.update({k: render_prescription(k, presc_map=_pp) for k in _pp})
         
     return True
 

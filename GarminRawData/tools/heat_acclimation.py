@@ -35,7 +35,6 @@ sys.path.insert(0, str(COACH_MCP))
 
 from config import ATHLETE  # noqa: E402
 
-ACTS_FILE  = BASE_DIR / "running_activities_all.json"
 CACHE_DIR  = Path(__file__).resolve().parent.parent / "wellness"
 
 RHR = ATHLETE["rhr"]
@@ -126,10 +125,8 @@ def load_heat_trimp(days: int = 90) -> dict[str, dict]:
     today  = date.today()
     cutoff = today - timedelta(days=days)
 
-    try:
-        acts = json.loads(ACTS_FILE.read_text())
-    except Exception:
-        return {}
+    from activity_loader import load_activities_merged
+    acts = load_activities_merged()
 
     daily: dict[str, dict] = {}
 

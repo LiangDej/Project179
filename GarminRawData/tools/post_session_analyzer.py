@@ -108,21 +108,62 @@ def get_latest_activity_id():
     except Exception as e:
         print(f"⚠️  Live fetch failed ({e}) — fallback to cache")
     # Fallback: cache, but sort by startTimeLocal desc to avoid stale [0]
-    acts_file = BASE_DIR / "running_activities_all.json"
-    with open(acts_file) as f:
-        acts = json.load(f)
-    acts_sorted = sorted(acts, key=lambda a: a.get("startTimeLocal", ""), reverse=True)
+    from activity_loader import load_activities_merged
+    acts_sorted = sorted(load_activities_merged(allow_live=False),
+                         key=lambda a: a.get("startTimeLocal", ""), reverse=True)
     return acts_sorted[0]["activityId"], acts_sorted[0]["startTimeLocal"]
 
 
-def get_activity_meta(act_id):
-    acts_file = BASE_DIR / "running_activities_all.json"
-    with open(acts_file) as f:
-        acts = json.load(f)
-    for a in acts:
+def get_activity_meta(act_id, data: dict | None = None):
+    """(startTimeLocal, duration) — runs AND cross-training, else the fetched
+    activity's own summary (v1.8: --id on an elliptical gave date 'custom')."""
+    from activity_loader import load_load_activities
+    for a in load_load_activities():
         if a["activityId"] == act_id:
             return a["startTimeLocal"], a.get("duration", 0)
+    sd = ((data or {}).get("_activitySummary") or {}).get("summaryDTO") or {}
+    if sd.get("startTimeLocal"):
+        return sd["startTimeLocal"].replace("T", " ")[:19], sd.get("duration", 0)
     return None, 0
+
+
+RUN_TYPE_KEYS = {"running", "treadmill_running", "trail_running", "track_running"}
+
+
+def cross_training_report(act_id: int, data: dict) -> dict:
+    """Non-running cardio (elliptical, bike, swim…): HR-based summary only —
+    pace/cadence/GCT/decoupling/form are running metrics and are skipped, and
+    nothing is written to the RUNNING session log."""
+    from training_load import calc_hr_tss
+    s = (data.get("_activitySummary") or {})
+    sd = s.get("summaryDTO") or {}
+    tk = (s.get("activityTypeDTO") or {}).get("typeKey", "?")
+    hrs = [m["metrics"][i] for m in data.get("activityDetailMetrics", [])
+           for i, d in enumerate(data.get("metricDescriptors", []))
+           if d.get("key") == "directHeartRate" and m["metrics"][i] is not None] \
+        if data.get("metricDescriptors") else []
+    zones = {}
+    if hrs:
+        for name, lo, hi in HR_ZONES:
+            zones[name] = round(sum(1 for h in hrs if lo <= h < hi or (name == HR_ZONES[-1][0] and h >= lo)) / len(hrs) * 100, 1)
+    act = {"averageHR": sd.get("averageHR"), "duration": sd.get("duration")}
+    out = {"activity_id": act_id, "type": tk, "date": (sd.get("startTimeLocal") or "")[:10],
+           "duration_min": round((sd.get("duration") or 0) / 60, 1),
+           "avg_hr": sd.get("averageHR"), "max_hr": sd.get("maxHR"),
+           "hr_tss": calc_hr_tss(act), "zone_pct": zones,
+           "aerobic_te": sd.get("trainingEffect"), "anaerobic_te": sd.get("anaerobicTrainingEffect"),
+           "e_ceiling": HR_ZONES[0][2]}
+    return out
+
+
+def print_cross_training(r: dict):
+    print(f"\n{'=' * 55}\n🚴 CROSS-TRAINING REPORT | {r['date']} | {r['type']}\n{'=' * 55}")
+    print(f"⏱️  {r['duration_min']} min | ❤️  HR avg {r['avg_hr']} / max {r['max_hr']} (E ceiling {r['e_ceiling']})")
+    if r["zone_pct"]:
+        print("📊 Zones: " + "  ".join(f"{k.split()[0]} {v}%" for k, v in r["zone_pct"].items()))
+    print(f"📈 hrTSS {r['hr_tss']} (นับเข้า PMC/ACWR แล้ว) | Aerobic TE {r['aerobic_te']} | Anaerobic TE {r['anaerobic_te']}")
+    print("ℹ️  ไม่วิเคราะห์ pace/cadence/form (ไม่ใช่การวิ่ง) และไม่บันทึกลง running session log")
+    print("=" * 55)
 
 
 # ---------------------------------------------------------------------------
@@ -321,14 +362,8 @@ def analyze(data):
     list_entry: dict = {}
     if act_id:
         try:
-            from pathlib import Path as _P
-            _acts_path = _P(__file__).resolve().parent.parent / "running_activities_all.json"
-            if _acts_path.exists():
-                import json as _json
-                for a in _json.loads(_acts_path.read_text()):
-                    if a.get("activityId") == act_id:
-                        list_entry = a
-                        break
+            from activity_loader import load_activities_merged
+            list_entry = next((a for a in load_activities_merged() if a.get("activityId") == act_id), {})
         except Exception:
             pass
 
@@ -393,7 +428,7 @@ def analyze_easy_run(r):
     avg_hr = r["avg_hr"]
     e_ceiling = ZONES[1][2]  # top of Z2 (Marathon) = bottom of Z3
 
-    hr_delta = avg_hr - ZONES[0][2]  # diff vs top of Z1 (155 bpm)
+    hr_delta = avg_hr - ZONES[0][2]  # diff vs E ceiling (config)
 
     if z1_z2 >= 90:
         grade = "A ✅  — Easy run สมบูรณ์แบบ Truly aerobic"
@@ -427,16 +462,22 @@ def analyze_easy_run(r):
 # ---------------------------------------------------------------------------
 # Quality run grading
 # ---------------------------------------------------------------------------
+DC_GRADE_A, DC_GRADE_B = 8, 12   # decoupling % bands below Friel's 5 % "good"
+
+
 def grade_session(r):
+    """S/A need low decoupling + form inside the athlete's own baselines
+    (athlete.json → form_baselines; v1.8 — cadence 155/153 + VR 8.5/9.5 were
+    typed in here, separate from BASELINES)."""
     dc  = r["decoupling"] or 0
     cad = r["cadence"] or 0
     vr  = r["vr"] or 0
-
-    if dc < 5 and cad >= 155 and (vr == 0 or vr <= 8.5):
+    B = BASELINES
+    if dc < B["decoupling_good"] and cad >= B["grade_cadence_s"] and (vr == 0 or vr <= B["vr_good"]):
         return "S 🏆"
-    elif dc < 8 and cad >= 153 and (vr == 0 or vr <= 9.5):
+    elif dc < DC_GRADE_A and cad >= B["grade_cadence_a"] and (vr == 0 or vr <= B["vr_warn"]):
         return "A ✅"
-    elif dc < 12:
+    elif dc < DC_GRADE_B:
         return "B 🟡"
     else:
         return "C ⚠️"
@@ -457,9 +498,9 @@ def flag_issues(r):
             flags.append(f"🔴 Vertical Ratio สูง ({r['vr']}%) — สูญเสียพลังงานแนวตั้ง (เป้า ≤{BASELINES['vr_good']}%)")
 
     if r["power"]:
-        if r["power"] < BASELINES["power_min"]:
+        if BASELINES.get("power_min") and r["power"] < BASELINES["power_min"]:
             flags.append(f"🟡 Power ต่ำ ({r['power']}W < {BASELINES['power_min']}W)")
-        elif r["power"] > BASELINES["power_max"]:
+        elif BASELINES.get("power_max") and r["power"] > BASELINES["power_max"]:
             flags.append(f"🟡 Power สูง ({r['power']}W > {BASELINES['power_max']}W)")
 
     dc = r["decoupling"]
@@ -565,12 +606,9 @@ def analyze_laps(splits: dict, is_treadmill: bool = False,
     # split by GPS/distance auto-lap (e.g. one 8min rep crossing a 1km mark)
     # get counted as separate reps instead of one. Use PACE, not just
     # duration/tag, to tell recovery jogs and true reps apart.
-    try:
-        from config import VDOT_PACES as _VP
-        _fast_thresh = _VP["M"][1]   # slower than this -> not a stride candidate
-        _slow_thresh = _VP["E"][1]   # slower than this -> definitely a recovery jog
-    except Exception:
-        _fast_thresh, _slow_thresh = 325, 404  # VDOT-40 fallback (M-slow, E-slow)
+    from config import VDOT_PACES as _VP
+    _fast_thresh = _VP["M"][1]   # slower than this -> not a stride candidate
+    _slow_thresh = _VP["E"][1]   # slower than this -> definitely a recovery jog
 
     def _lap_pace_sec_km(lap):
         dist_km = (lap.get("distance") or 0) / 1000
@@ -918,19 +956,16 @@ def _classify_speed(speed_kmh: float) -> str:
     zone ที่ติดกัน (sec/km). Fixed 2026-06-09.
     """
     pace_sec = 3600 / speed_kmh if speed_kmh > 0 else 999
-    try:
-        from config import VDOT_PACES as VP
-        # zone (fast_lo, slow_hi) sec/km — faster zone first
-        r_hi, i_lo = VP["R"][1], VP["I"][0]
-        i_hi, t_lo = VP["I"][1], VP["T"][0]
-        t_hi, m_lo = VP["T"][1], VP["M"][0]
-        m_hi, e_lo = VP["M"][1], VP["E"][0]
-        b_ri = (r_hi + i_lo) / 2   # R|I
-        b_it = (i_hi + t_lo) / 2   # I|T
-        b_tm = (t_hi + m_lo) / 2   # T|M
-        b_me = (m_hi + e_lo) / 2   # M|E
-    except Exception:
-        b_ri, b_it, b_tm, b_me = 270, 290, 313, 331  # VDOT-40 fallback
+    from config import VDOT_PACES as VP
+    # zone (fast_lo, slow_hi) sec/km — faster zone first
+    r_hi, i_lo = VP["R"][1], VP["I"][0]
+    i_hi, t_lo = VP["I"][1], VP["T"][0]
+    t_hi, m_lo = VP["T"][1], VP["M"][0]
+    m_hi, e_lo = VP["M"][1], VP["E"][0]
+    b_ri = (r_hi + i_lo) / 2   # R|I
+    b_it = (i_hi + t_lo) / 2   # I|T
+    b_tm = (t_hi + m_lo) / 2   # T|M
+    b_me = (m_hi + e_lo) / 2   # M|E
     if pace_sec <= b_ri:
         return "R"
     elif pace_sec <= b_it:
@@ -1173,9 +1208,15 @@ def _run(args):
         print(f"📡 Fetching activity ID: {act_id}...")
 
     data      = fetch_activity(act_id)
+    _tk = ((data.get("_activitySummary") or {}).get("activityTypeDTO") or {}).get("typeKey")
+    if _tk and _tk not in RUN_TYPE_KEYS:
+        ct = cross_training_report(act_id, data)
+        if not args.json:
+            print_cross_training(ct)
+        return {"activity_id": act_id, "date": ct["date"], "cross_training": ct}
     r         = analyze(data)
 
-    start_str, duration = get_activity_meta(act_id)
+    start_str, duration = get_activity_meta(act_id, data)
     if start_str:
         try:
             client = get_garmin_client()

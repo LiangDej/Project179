@@ -115,36 +115,19 @@ class TestConfig(unittest.TestCase):
         self.assertLess(t_lo, m_lo)
         self.assertLess(m_lo, e_lo)
 
-    def test_get_current_phase_recovery_period(self):
-        """วันที่ 9 May 2026 ต้องอยู่ใน Recovery + Phra Rama 8 (taper)"""
-        phase = get_current_phase(date(2026, 5, 9))
-        self.assertIsNotNone(phase)
-        self.assertEqual(phase["phase"], "taper")
-        self.assertIn("Phra Rama 8", phase["name"])
+    def test_get_current_phase_matches_training_plan(self):
+        """v1.8: phases are data (training_plan.json) — every phase's midpoint
+        must resolve to that phase (was: personal 2026 dates hardcoded here)."""
+        self.assertTrue(TRAINING_PHASES)
+        for p in TRAINING_PHASES:
+            mid = p["start"] + (p["end"] - p["start"]) / 2
+            got = get_current_phase(mid)
+            self.assertIsNotNone(got, p["name"])
+            self.assertEqual(got["name"], p["name"])
 
-    def test_get_current_phase_base_building(self):
-        """วันที่ 1 June 2026 ต้องอยู่ใน Base Building I"""
-        phase = get_current_phase(date(2026, 6, 1))
-        self.assertIsNotNone(phase)
-        self.assertEqual(phase["phase"], "base")
-
-    def test_get_current_phase_quality(self):
-        """วันที่ 15 September 2026 ต้องอยู่ใน Quality phase"""
-        phase = get_current_phase(date(2026, 9, 15))
-        self.assertIsNotNone(phase)
-        self.assertEqual(phase["phase"], "quality")
-
-    def test_get_current_phase_race_specific(self):
-        """A-race day (Bangsaen42 15 Nov 2026) ต้องอยู่ใน taper phase"""
-        phase = get_current_phase(date(2026, 11, 15))
-        self.assertIsNotNone(phase)
-        self.assertEqual(phase["phase"], "taper")
-
-    def test_get_current_phase_taper_before_fuji(self):
-        """December 2026 ต้องอยู่ใน Peak + Taper + Fuji"""
-        phase = get_current_phase(date(2026, 12, 5))
-        self.assertIsNotNone(phase)
-        self.assertEqual(phase["phase"], "taper")
+    def test_get_current_phase_outside_plan_is_none(self):
+        last = max(p["end"] for p in TRAINING_PHASES)
+        self.assertIsNone(get_current_phase(last + timedelta(days=400)))
 
     def test_phase_prescriptions_base_max_1_quality(self):
         """Base phase ต้องมี quality_max = 1 (ยังไม่ใช้ 2 quality sessions)"""

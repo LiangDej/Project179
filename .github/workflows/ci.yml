@@ -42,6 +42,7 @@ jobs:
         run: |
           [ -f GarminRawData/athlete.json ] || cp GarminRawData/athlete.example.json GarminRawData/athlete.json
           [ -f GarminRawData/races.json ]   || cp GarminRawData/races.example.json   GarminRawData/races.json
+          [ -f GarminRawData/training_plan.json ] || cp GarminRawData/training_plan.example.json GarminRawData/training_plan.json
 
       - name: Run test suite
         env:

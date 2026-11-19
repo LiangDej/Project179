@@ -2,9 +2,47 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
-## [Unreleased]
+## [1.8] — 2026-11-19
+
+Single sources of truth, Jack Daniels + sport-science rules enforced in code,
+and no hardcoded athlete/race/product values in any tool. Tools: 31 → 33.
+
+### Changed (behaviour — read this)
+- **E zone follows JD: ceiling = 79 % HRmax (154 at MHR 195), was 163 (%HRR 0.79 = Friel, not JD).** Easy runs averaging 155–163 now count as M in zone reports; weekly "E %" drops accordingly. M zone becomes 154–174.
+- **Paces are derived from VDOT** (`vdot_math.jd_paces`: E 59–74 % VO2max, M = VDOT-predicted marathon pace, T 86–88 %, I 97.5–100 %, R = 1500 m–mile pace). The hand-typed `athlete.json → vdot_paces_sec` had drifted (VDOT 40: M 5:16–5:25 vs JD 5:23–5:29, E fast end 5:37 vs 5:51). Optional `pace_overrides_sec` remains.
+- **JD per-session limits enforced when planning, warned after the fact** (`jd_rules.py`): T ≤ 10 % of weekly volume (a 20-min tempo always allowed), I ≤ min(8 %, 10 km), R ≤ min(5 %, 8 km), M ≤ min(20 %, 29 km), long run ≤ 25 % (30 % under 64 km/wk) and ≤ 150 min. Reps are cut to fit and the cut is shown; `weekly_load_report` warns when a completed long run broke the limit. The 2026 block had 30–32 km long runs on ~46 km weeks.
+- **Taper follows the research (Bosquet 2007, Mujika & Padilla 2003): keep intensity, cut volume.** A-race keeps a short maintenance T until T-5 (was: no quality from T-10); volume cut 40 %/60 %. `taper_monitor` uses the same tier profiles (it had its own table and said "no quality at all" in race week).
+- **JD post-race recovery**: one easy day per 3 km raced — quality/long become easy (e.g. 8 days after a HM, 15 after a marathon). Nothing enforced this before.
+- **T/I/R prescribed by pace (+ treadmill km/h), HR only as a ceiling for T/M.** HR lags in 3–5 min reps and wrist HR can lock onto cadence.
+- **Cardio cross-training counts as training load.** Elliptical/bike/swim/row enter PMC and ACWR (hrTSS is HR-based); cached in gitignored `cross_training_all.json`. CTL rose 35 → 44 once 15 elliptical sessions were counted.
+- **ACWR = EWMA 7/28 (Williams 2017)**, the windows its 0.8–1.3/1.5 thresholds come from (was ATL/CTL with a 42-day chronic window). Shown as a soft warning (Impellizzeri 2020).
+- **Volume progression check uses JD's rule** (≤ ~1 mile per running session per week, hold 3–4 weeks) instead of the "10 % rule".
+- `daily_brief --type` removed (it injected hardcoded T/I workouts).
+
+### Fixed — single sources
+- **Season plan moved from `config.py` to `GarminRawData/training_plan.json`** (gitignored; `training_plan.example.json` template): phases with `weekly_km` and workout **specs** (reps/rep_min/rep_km/rest, combo parts), not text with HR/pace typed in. Changing the plan no longer touches protected code.
+- **One week computation** (`training_planner.week_plan`): season table, weekly plan and brief used three copies of the volume logic; phase now comes from the plan by date (the week-offset rule is only a fallback), volume from the plan's `weekly_km` (the dynamic fallback had put 70 km/wk on the post-injury base block).
+- **One day prescription** (`session_prescriber.prescribe_day`) used by the weekly plan AND the daily brief — the brief had its own `WEEKLY_PLAN`/`build_action_plan` (non-progressive long run, own strides distance). **One readiness engine** (`readiness.py`): the prescriber ignored RHR and used other BB cut-offs; today's BB/HRV/RHR now apply only to today, not to every day of the week.
+- One weekly template from `athlete.json` (rest/strength days) instead of hardcoded day maps in two tools.
+- One heat model (`bangkok_climate.ely_penalty_fraction`): `race_pace_planner` had its own table (+4.6 % vs +5.2 % at 26 °C); one Bangkok climate table (weather_adjuster had a second copy).
+- One activity loader for every tool (10 tools read `running_activities_all.json` directly and missed live, not-yet-synced runs); the live Garmin call is made once per process.
+- One nutrition protocol (`config.DAY_NUTRITION`) — two diverging copies in daily_brief/session_prescriber; `weather_adjuster` now shows the athlete's dosing rule (was the per-station solver: 11 caps at 3 stations).
+- Race B goals from `races.json → goal_tiers` (were hardcoded Sub 1:55 / Sub 4:15); race locations only from `races.json` (hardcoded Bangsaen/Sponsor21/Fuji coordinates and a Fuji climate table removed); no fallback race in the prescriber (it pointed at Bangsaen42 2026-11-15).
+- `config.py`: no personal fallbacks (rhr 44/mhr 195/vdot 40/lthr 183/dates) — falls back to `athlete.example.json`; no product fallbacks (650/90 were the pre-2026-08-02 wrong label reading — would overstate sodium 4×). Duplicate `calculate_paces_from_vdot` removed.
+
+### Fixed — hardcode moved to data
+- `athlete.json`: `lt2_test.tm_hr_anchors` (treadmill HR↔pace, was in `treadmill_pace_model.py`), `form_baselines` (incl. grade cadence floors that were typed into `grade_session`), `sweat_na_mmol` (was 45 in code), `session_nutrition` (post-run/carb-load/coffee text), `strength_routine`, product display names.
+- `garmin_workout_pusher`: all paces from VDOT (warm-up "7:00–6:30", strides "5:30–5:00", LT2 test "5:20–5:05", VDOT-40 fallbacks); quality workouts built from the session's structured `spec` instead of regex on text.
+- `race_pace_planner` HR guide from zones (was "HR < 175", "178"); `hrv_trend` advice uses the E ceiling (was "HR < 140"); `post_session_analyzer` VDOT-40 pace fallbacks removed; `session_logger --batch-easy` default = last 90 days (was 2026-03-26).
+
+### Fixed — bugs
+- `post_session_analyzer --id <elliptical>`: date "custom", wellness fetch errors, running metrics of 0 and an attempted run-log write. Non-running activities now get a cross-training report (duration, HR, zones, hrTSS, TE) and are never written to the running log.
+- `training_planner` marked every week after race day as "🏁 RACE".
+- Taper volume cut twice inside a taper phase (plan volume already cut) — 3 km easy runs.
 
 ### Added
+- `jd_rules.py`, `readiness.py` (protected tools 31 → 33); `training_plan.example.json`.
+- 33 test_suite checks incl. an AST scan that fails on literal HR/pace/race/product/date values in tool code; CI fixtures include `training_plan.json`; unit tests for phases are data-driven (were pinned to 2026 dates). 208 checks / 69 unit tests.
 - `GarminRawData/fetch_partner_wellness.py` — raw wellness fetch (BB/HRV/RHR/sleep/stress) for a second Garmin account, fully separate from the athlete pipeline: own creds file (`~/.config/garmin-coach/.env.partner`), own tokenstore, output to gitignored `wellness_partner/`. No coaching logic.
 
 ## [1.7.2] — 2026-11-19

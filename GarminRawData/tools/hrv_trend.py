@@ -113,6 +113,14 @@ def rolling_avg(vals: list[float], n: int) -> list[float | None]:
     return result
 
 
+def _e_ceiling() -> int:
+    """Easy HR ceiling from config (JD 79 % HRmax) — no literal bpm here."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "skills" / "garmin_coach_mcp"))
+    from config import HR_ZONE_BOUNDS
+    return HR_ZONE_BOUNDS["Z1_E"][1]
+
+
 def crash_report(records: list[dict]) -> dict:
     """
     HRV crash detector — returns severity + actionable prescription.
@@ -159,7 +167,7 @@ def crash_report(records: list[dict]) -> dict:
         headline   = f"HRV CRASH — เมื่อคืนต่ำกว่าช่วงปกติ {streak} คืนติด"
         advice     = [
             "ยกเลิก Quality session ทั้งหมดจนกว่า HRV กลับ BALANCED",
-            "วิ่ง Easy ≤ 6km HR < 140 หรือพักเต็ม วันเว้นวัน",
+            f"วิ่ง Easy ≤ 6km HR < {_e_ceiling()} หรือพักเต็ม วันเว้นวัน",
             "นอน ≥ 8h | หลีกเลี่ยงแอลกอฮอล์และคาเฟอีนบ่าย",
             "ตรวจ RHR เช้า — ถ้า >baseline+5 → REST เต็มวัน",
         ]

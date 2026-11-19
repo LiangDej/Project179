@@ -83,3 +83,30 @@ def vdot_to_pace_sec(vdot: float, pct_vo2max: float) -> float:
     if vel_m_min <= 0:
         return 360.0
     return round(1000 / vel_m_min * 60, 1)
+
+
+# ---------------------------------------------------------------------------
+# JD training paces — the ONE place paces are derived from VDOT (v1.8).
+# config.VDOT_PACES calls this; athlete.json no longer stores paces (it used to
+# carry hand-typed vdot_paces_sec that had drifted: M 5:16 vs JD 5:26 @ VDOT 40).
+#   E  = 59–74 % VO2max                     (Daniels 3rd ed., ch. 4)
+#   M  = predicted marathon race pace        (Daniels: M = goal/VDOT FM pace)
+#   T  = 86–88 % VO2max  (~60-min race pace; 88 % reproduces the JD tables)
+#   I  = 97.5–100 % VO2max (vVO2max)
+#   R  = 1500 m – mile race pace
+# M is a single pace in JD; ±JD_SINGLE_PACE_TOL_S gives a usable watch band.
+# ---------------------------------------------------------------------------
+JD_PCT = {"E": (0.74, 0.59), "T": (0.88, 0.86), "I": (1.00, 0.975)}
+JD_SINGLE_PACE_TOL_S = 3
+
+
+def jd_paces(vdot: float) -> dict:
+    """{zone: (fast_sec_per_km, slow_sec_per_km)} for E/M/T/I/R."""
+    out = {k: (int(round(vdot_to_pace_sec(vdot, hi))), int(round(vdot_to_pace_sec(vdot, lo))))
+           for k, (hi, lo) in JD_PCT.items()}
+    m = predict_race_time(vdot, 42195) * 60 / 42.195
+    out["M"] = (int(round(m - JD_SINGLE_PACE_TOL_S)), int(round(m + JD_SINGLE_PACE_TOL_S)))
+    r_fast = predict_race_time(vdot, 1500) * 60 / 1.5
+    r_slow = predict_race_time(vdot, 1609.34) * 60 / 1.60934
+    out["R"] = (int(round(r_fast)), int(round(r_slow)))
+    return {k: out[k] for k in ("E", "M", "T", "I", "R")}

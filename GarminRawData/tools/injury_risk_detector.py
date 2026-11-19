@@ -30,7 +30,6 @@ from pathlib import Path
 BASE_DIR  = Path(__file__).parent.parent
 TOOLS_DIR = Path(__file__).parent
 COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
-DATA_FILE = BASE_DIR / "running_activities_all.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
@@ -55,13 +54,8 @@ RISK_LEVELS = {0: "✅ LOW", 1: "🟡 MODERATE", 2: "🔴 HIGH", 3: "🚨 CRITIC
 # Data helpers
 # ---------------------------------------------------------------------------
 def _load_activities(lookback_days: int) -> list[dict]:
-    if not DATA_FILE.exists():
-        return []
-    try:
-        with open(DATA_FILE, encoding="utf-8") as f:
-            all_acts = json.load(f)
-    except Exception:
-        return []
+    from activity_loader import load_activities_merged
+    all_acts = load_activities_merged()
     cutoff = date.today() - timedelta(days=lookback_days)
     result = []
     for a in all_acts:
@@ -169,28 +163,18 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
     a false "spike + CRITICAL". Load is hrTSS (intensity-aware) when HR exists —
     same engine as training_load.py — else falls back to distance (km).
     """
-    # ACWR via EWMA = ATL/CTL. Williams et al. 2017 (BJSM 51:209) showed the
-    # rolling-average ACWR is mathematically biased; the EWMA form is preferred.
-    # We reuse training_load.compute_current_pmc() (called with NO args so it
-    # self-loads the full 200-day warmup history) — same engine as daily_brief /
-    # season_summary, so the ratio is consistent and not distorted by data gaps
-    # in a fixed 28-day window or by activities missing HR.
-    #   ATL (τ=7)  = acute load,  CTL (τ=42) = chronic load
+    # ACWR via EWMA 7/28 (Williams et al. 2017) on hrTSS of runs + cardio
+    # cross-training — training_load.ewma_acwr, one implementation.
+    # Impellizzeri 2020 questions ACWR's predictive value → a soft warning only.
     try:
-        from training_load import compute_current_pmc, pmc_confidence
-        pmc = compute_current_pmc()
-        if not pmc:
+        from training_load import ewma_acwr, pmc_confidence
+        acwr, atl, ctl = ewma_acwr()
+        if acwr is None:
             return None
-        _, _, ctl, atl, _ = pmc[-1]
     except Exception:
         return None
 
-    # A fresh clone / new athlete with <14 days of history has an
-    # artificially low CTL (42-day EWMA hasn't converged yet), so ATL/CTL
-    # blows up to an absurd ratio (e.g. 22.9/4.7 = 4.9) that reads as a
-    # false CRITICAL — same cold-start problem pmc_confidence() already
-    # guards against for the daily_brief PMC section. Reuse it here instead
-    # of a second, looser "ctl < 1" heuristic that doesn't actually catch it.
+    # Cold start (<14 days history): chronic EWMA not converged → skip.
     try:
         _, confidence, _ = pmc_confidence(activities)
         if confidence in ("NONE", "LOW"):
@@ -198,10 +182,9 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
     except Exception:
         pass
 
-    if ctl < 1:   # ไม่มี baseline พอ (belt-and-suspenders for the confidence check above)
+    if ctl < 1:
         return None
 
-    acwr = atl / ctl
     if acwr <= ACWR_CAUTION:
         return None
 
@@ -209,7 +192,7 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
     return {
         "signal":   "Acute:Chronic Workload Ratio สูง",
         "severity": severity,
-        "detail":   f"ACWR {acwr:.2f} (ATL {atl:.0f} / CTL {ctl:.0f}, EWMA) — sweet spot 0.8–1.3",
+        "detail":   f"ACWR {acwr:.2f} (acute {atl:.0f} / chronic {ctl:.0f}, EWMA 7/28) — sweet spot 0.8–1.3",
         "action":   "ACWR > 1.5 = danger zone (Gabbett 2016) — ลด load สัปดาห์หน้าให้ ACWR กลับ < 1.3",
     }
 

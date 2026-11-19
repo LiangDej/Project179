@@ -17,7 +17,9 @@ _mcp = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "skil
 if os.path.isdir(_mcp):
     sys.path.insert(0, _mcp)
 try:
-    from config import ATHLETE, VDOT_PACES, TRAINING_PHASES, PHASE_PRESCRIPTIONS, get_current_phase
+    from config import (ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS, TRAINING_PHASES,
+                        PHASE_PRESCRIPTIONS, get_current_phase, render_prescription)
+    from jd_rules import long_run_cap
 except ImportError:
     print("❌ config.py not found — run from GarminRawData/tools/")
     sys.exit(1)
@@ -54,6 +56,8 @@ PHASE_PEAK_RATIO = {"base": 0.886, "quality": 0.929, "race_specific": 1.0}
 BASE_FLOOR_KM    = 20   # generic sanity floor if activity history is empty/corrupt
 STRETCH_FACTOR   = 1.13  # peak plan = historical peak + 13% realistic stretch
 DELOAD_FACTOR    = 0.80  # deload week = 80% of that week's peak
+WU_CD_KM         = 4     # warm-up + cool-down around a quality session
+EASY_MIN_KM, EASY_MAX_KM = 6, 14
 
 # Generic taper science (Mujika & Padilla): volume drops progressively as % of
 # peak, floor at ~15% shakeout the week before race, 0 on race week itself.
@@ -81,9 +85,9 @@ def get_phase_for_week(weeks_to_race: int, total_weeks: int) -> str:
 def _current_weekly_km() -> float:
     import json as _json
     from collections import defaultdict
-    acts_path = os.path.join(os.path.dirname(__file__), "..", "running_activities_all.json")
+    from activity_loader import load_activities_merged
     try:
-        acts = _json.loads(open(acts_path).read())
+        acts = load_activities_merged()
         weekly: dict = defaultdict(float)
         today = date.today()
         cutoff = today - timedelta(weeks=6)
@@ -113,9 +117,9 @@ def _historical_peak_km(lookback_weeks: int = 52) -> float:
     """
     import json as _json
     from collections import defaultdict
-    acts_path = os.path.join(os.path.dirname(__file__), "..", "running_activities_all.json")
+    from activity_loader import load_activities_merged
     try:
-        acts = _json.loads(open(acts_path).read())
+        acts = load_activities_merged()
         weekly: dict = defaultdict(float)
         today = date.today()
         cutoff = today - timedelta(weeks=lookback_weeks)
@@ -203,11 +207,10 @@ def _load_schedule_config() -> tuple[int, set, str | None]:
     return training_days, rest_days, strength_day
 
 
-def _build_session_schedule(q_max: int, long_km) -> tuple[str, str]:
-    """Return (schedule_str, quality_day_tag) for one week.
-
-    quality_day_tag is unused by callers today but kept for future use by
-    session_prescriber to know which day is Q1 vs Q2 without re-deriving it.
+def weekly_structure(q_max: int) -> dict:
+    """{weekday 0=Mon..6: day_type} from athlete.json schedule — the ONE weekly
+    template (session_prescriber + daily_brief used to hardcode their own).
+    day_type ∈ strength | quality1 | quality2 | easy | easy+strides | long | rest.
     """
     training_days, rest_cfg, strength_day = _load_schedule_config()
     excluded = rest_cfg | ({strength_day} if strength_day else set())
@@ -215,35 +218,41 @@ def _build_session_schedule(q_max: int, long_km) -> tuple[str, str]:
     while len(active) > training_days and len(active) > 3:
         active.pop(len(active) // 2)  # trim a mid-week day first
 
-    schedule = {d: "REST" for d in rest_cfg}
+    schedule = {d: "rest" for d in _DAY_ORDER}
     if strength_day:
-        schedule[strength_day] = "Str"
-    for d in _DAY_ORDER:
-        if d not in schedule and d not in active:
-            schedule[d] = "REST"  # trimmed beyond training_days_per_week
-
+        schedule[strength_day] = "strength"
     long_day = "sunday" if "sunday" in active else (active[-1] if active else _DAY_ORDER[-1])
-    schedule[long_day] = f"Long {long_km}km"
+    schedule[long_day] = "long"
     remaining = [d for d in active if d != long_day]
-
     quality_days = []
     if remaining:
         quality_days.append(remaining[0])
     if q_max >= 2 and len(remaining) >= 3:
         quality_days.append(remaining[len(remaining) // 2])
     for i, d in enumerate(quality_days):
-        schedule[d] = f"Q{i + 1}"
-
+        schedule[d] = f"quality{i + 1}"
     other = [d for d in remaining if d not in quality_days]
     if other:
-        strides_day = other[-1]
-        schedule[strides_day] = "E+strides"
-        other = other[:-1]
-    for d in other:
-        schedule[d] = "E"
+        schedule[other[-1]] = "easy+strides"
+        for d in other[:-1]:
+            schedule[d] = "easy"
+    return {i: schedule[d] for i, d in enumerate(_DAY_ORDER)}
 
-    order_str = " | ".join(f"{_DAY_ABBR[d]}:{schedule[d]}" for d in _DAY_ORDER)
-    return order_str, ",".join(quality_days)
+
+_SHORT = {"strength": "Str", "rest": "REST", "quality1": "Q1", "quality2": "Q2",
+          "easy": "E", "easy+strides": "E+strides"}
+
+
+def _build_session_schedule(q_max: int, long_km) -> tuple[str, str]:
+    """(schedule_str, quality_days) for the season table — from weekly_structure."""
+    ws = weekly_structure(q_max)
+    parts, qd = [], []
+    for i, d in enumerate(_DAY_ORDER):
+        t = ws[i]
+        parts.append(f"{_DAY_ABBR[d]}:{f'Long {long_km}km' if t == 'long' else _SHORT[t]}")
+        if t.startswith("quality"):
+            qd.append(d)
+    return " | ".join(parts), ",".join(qd)
 
 
 # ---------------------------------------------------------------------------
@@ -272,14 +281,6 @@ def build_plan(race_key: str, target_date: date, num_weeks: int):
     t_pace  = VDOT_PACES["T"]
     i_pace  = VDOT_PACES["I"]
 
-    # Dynamic volume targets: this athlete's own recent load + best-ever week,
-    # not a fixed per-athlete table (see _historical_peak_km / _target_peak_km).
-    actual_recent_km   = _current_weekly_km()
-    historical_peak_km = _historical_peak_km()
-    base_start_km      = max(BASE_FLOOR_KM, int(actual_recent_km / 5) * 5)
-    target_peak_km     = _target_peak_km(actual_recent_km, historical_peak_km)
-    phase_km           = _build_phase_km(base_start_km, target_peak_km)
-
     print("=" * 70)
     print(f"📅 TRAINING PLANNER — {race['name']}")
     print(f"   VDOT {vdot} | Race: {race_date} | {weeks_total} สัปดาห์")
@@ -297,50 +298,31 @@ def build_plan(race_key: str, target_date: date, num_weeks: int):
         week_end   = week_start + timedelta(days=6)
         weeks_to_race = max(0, (race_date - week_start).days // 7)
 
-        phase_name = get_phase_for_week(weeks_to_race, weeks_total)
-        presc = PHASE_PRESCRIPTIONS.get(phase_name, PHASE_PRESCRIPTIONS["base"])
-
-        # Volume — progressive with 10% rule, deload every 4th week
-        if phase_name == "taper":
-            km = _taper_km(weeks_to_race, target_peak_km)
-        else:
-            phase_cfg = phase_km[phase_name]
-            if phase_name == "base":
-                raw_km = base_start_km + min(w, 10) * phase_cfg["step"]
-            else:
-                raw_km = phase_cfg["min"] + min(w, 10) * phase_cfg["step"]
-            raw_km = min(raw_km, phase_cfg["max"])
-            # Deload every 4th week
-            if (w + 1) % 4 == 0:
-                raw_km = int(raw_km * DELOAD_FACTOR)
-            km = raw_km
+        wp = week_plan(week_start, race_key, race_date)
+        phase_name, presc, km = wp["phase"], wp["prescription"], wp["km_target"]
+        if phase_name != "taper":
             peak_km = max(peak_km, km)
-
-        # Quality sessions
         q_max = presc.get("quality_max", 1)
-        q1 = presc["quality1"]
-        q2 = presc.get("quality2", None)
-
-        sched_str, _ = _build_session_schedule(q_max, presc.get("long_km", "?"))
-        if q_max >= 2 and q2:
-            qual_str = f"{q1['type']}+{q2['type']}"
-        else:
-            qual_str = q1['type']
-        sessions = sched_str.replace("Q1", q1['type']).replace("Q2", q2['type'] if q2 else "")
+        q1 = presc.get("quality1") or {"type": "-"}
+        q2 = presc.get("quality2")
+        sched_str, _ = _build_session_schedule(q_max, wp["long_km"])
+        qual_str = f"{q1['type']}+{q2['type']}" if (q_max >= 2 and q2) else q1["type"]
+        sessions = sched_str.replace("Q1", q1["type"]).replace("Q2", q2["type"] if q2 else "")
 
         # Markers
         marker = ""
-        if weeks_to_race == 0:
+        if week_start <= race_date <= week_end:
             marker = "🏁 RACE"
             km = 0
             sessions = f"🏁 {race['name']} — {race_date}"
-        elif (w + 1) % 4 == 0 and phase_name not in ("taper",):
+        elif wp["is_deload"]:
             marker = "🔄 deload"
         elif km == peak_km and phase_name not in ("taper",):
             marker = "⭐ peak"
 
         phase_label = phase_name.replace("_", " ").title()
-        print(f"{w+1:<4} {str(week_start):<12} {phase_label:<14} {km:>5}  {qual_str:>8}  {marker}")
+        print(f"{w+1:<4} {str(week_start):<12} {phase_label:<14} {km:>5}  {qual_str:>8}  "
+              f"L{wp['long_km']:<3} {marker}{'  ✂️ JD' if wp['long_capped'] else ''}")
 
     print()
     print(f"⭐ Peak week: {peak_km} km")
@@ -371,87 +353,146 @@ def build_plan(race_key: str, target_date: date, num_weeks: int):
 # Public API — used by session_prescriber to link short + long term plans
 # ---------------------------------------------------------------------------
 
-def get_week_info(monday: date = None) -> dict:
+def progressive_long_km(phase_info: dict, monday: date) -> int:
     """
-    Return structured context for one training week.
-    Called by session_prescriber so the 7-day plan is aware of the 30-week plan.
+    Linear interpolation: long_km_start → long_km (peak) across the phase.
+    Deload weeks (every 4th week within a phase) get ~75% of that week's value.
+    Taper phase counts DOWN (start=high → peak=low) to reflect volume reduction.
+    Returns nearest even integer (clean distances: 16, 18, 20…).
+    """
+    if not phase_info:
+        return PHASE_PRESCRIPTIONS.get("quality", {}).get("long_km", 20)
 
-    Returns:
-        week_num      : 1-indexed week in the season (1–30)
-        total_weeks   : total weeks in plan
-        km_target     : target weekly km (already deloaded if deload week)
-        is_deload     : True if this is a 4th-week deload
-        phase         : "base" | "quality" | "race_specific" | "taper"
-        days_to_race  : calendar days until the active race (races.json)
-        race_name     : e.g. "Bangsaen42 Chonburi Marathon (42km)"
-        race_date     : e.g. "2026-11-15"
-        easy_km       : recommended easy run distance (km) to hit weekly target
+    prescription = PHASE_PRESCRIPTIONS.get(phase_info["phase"], {})
+    long_start   = prescription.get("long_km_start")
+    long_peak    = prescription.get("long_km", 16)
+
+    # No progression defined → use fixed peak
+    if long_start is None or long_start == long_peak:
+        return long_peak
+
+    phase_start  = phase_info["start"]
+    phase_end    = phase_info["end"]
+    total_weeks  = max(1, round((phase_end - phase_start).days / 7))
+    week_num     = max(0, (monday - phase_start).days // 7)  # 0-indexed
+
+    # Linear interpolation t: 0.0 (week 1) → 1.0 (last week) — clamped to [0,1]
+    t = min(1.0, week_num / max(1, total_weeks - 1))
+    raw = long_start + (long_peak - long_start) * t
+
+    # Deload every 4th week within the phase (week_num 3, 7, 11…) → 75%
+    # Skip deload logic for taper phase — volume reduction is already built-in
+    is_deload = (week_num + 1) % 4 == 0 and phase_info["phase"] != "taper"
+    if is_deload:
+        raw *= 0.75
+
+    # Round to nearest 2km for clean prescription
+    return max(8, round(raw / 2) * 2)
+
+
+def _phase_week_km(phase_info: dict, monday: date) -> tuple[int, bool]:
+    """(km, is_deload) from training_plan.json weekly_km [first, last] — linear
+    across the phase, every 4th week of a non-taper phase = DELOAD_FACTOR."""
+    lo, hi = phase_info["weekly_km"]
+    total = max(1, round((phase_info["end"] - phase_info["start"]).days / 7))
+    wk = max(0, (monday - phase_info["start"]).days // 7)
+    raw = lo + (hi - lo) * min(1.0, wk / max(1, total - 1))
+    deload = (wk + 1) % 4 == 0 and phase_info["phase"] != "taper"
+    return int(round(raw * (DELOAD_FACTOR if deload else 1.0))), deload
+
+
+def week_plan(monday: date = None, race_key: str | None = None,
+              race_date: date | None = None) -> dict:
+    """ONE computation of a training week (phase, volume, long run, quality,
+    easy km). get_week_info (brief / prescriber) and build_plan (season
+    table) both call this — they used to each "mirror" the logic by copy.
+
+    Volume: training_plan.json phase weekly_km when present (the agreed plan),
+    else the history-based dynamic fallback.
     """
     if monday is None:
         today = date.today()
         monday = today - timedelta(days=today.weekday())
 
-    race      = RACE_TARGETS[DEFAULT_RACE]   # A-race จาก races.json (active_race)
-    race_date = race["date"]
-    # Derive plan_start from config.TRAINING_PHASES — first base-phase start of
-    # THIS race's season (within 52 weeks before the race). 2026-11-18 fix:
-    # it used the first base phase in the whole list, so once a 2027 season was
-    # added a Sep-2027 race would have been planned from May 2026 (week 70+).
+    race      = RACE_TARGETS[race_key or DEFAULT_RACE]
+    race_date = race_date or race["date"]
     _season_floor = race_date - timedelta(weeks=52)
     plan_start = next(
         (p["start"] for p in TRAINING_PHASES
          if p["phase"] == "base" and _season_floor < p["start"] <= race_date),
-        date(2026, 5, 18),  # fallback if no base phase defined
+        race_date - timedelta(weeks=26),  # no base phase in training_plan.json
     )
-
-    week_idx      = max(0, (monday - plan_start).days // 7)   # 0-indexed
+    week_idx      = max(0, (monday - plan_start).days // 7)
     weeks_to_race = max(0, (race_date - monday).days // 7)
     total_weeks   = max(1, round((race_date - plan_start).days / 7))
     days_to_race  = (race_date - monday).days
 
-    phase_name = get_phase_for_week(weeks_to_race, total_weeks)
+    # Phase: training_plan.json (by date) is the source; week-offset rule only
+    # for dates the plan doesn't cover.
+    phase_info = get_current_phase(monday)
+    phase_name = phase_info["phase"] if phase_info else get_phase_for_week(weeks_to_race, total_weeks)
 
-    # Dynamic volume targets (mirrors build_plan logic exactly)
-    actual_recent_km   = _current_weekly_km()
-    historical_peak_km = _historical_peak_km()
-    base_start_km      = max(BASE_FLOOR_KM, int(actual_recent_km / 5) * 5)
-    target_peak_km     = _target_peak_km(actual_recent_km, historical_peak_km)
-    phase_km           = _build_phase_km(base_start_km, target_peak_km)
-
-    # Weekly km target (mirrors build_plan logic exactly)
-    if phase_name == "taper":
-        km_target = _taper_km(weeks_to_race, target_peak_km)
-        is_deload = False
+    if phase_info and phase_info.get("weekly_km"):
+        km_target, is_deload = _phase_week_km(phase_info, monday)
+        vol_src = "plan"
     else:
-        phase_cfg = phase_km[phase_name]
-        if phase_name == "base":
-            raw_km = base_start_km + min(week_idx, 10) * phase_cfg["step"]
+        actual_recent_km   = _current_weekly_km()
+        historical_peak_km = _historical_peak_km()
+        base_start_km      = max(BASE_FLOOR_KM, int(actual_recent_km / 5) * 5)
+        target_peak_km     = _target_peak_km(actual_recent_km, historical_peak_km)
+        phase_km           = _build_phase_km(base_start_km, target_peak_km)
+        if phase_name == "taper":
+            km_target, is_deload = _taper_km(weeks_to_race, target_peak_km), False
         else:
-            raw_km = phase_cfg["min"] + min(week_idx, 10) * phase_cfg["step"]
-        raw_km    = min(raw_km, phase_cfg["max"])
-        is_deload = (week_idx + 1) % 4 == 0
-        km_target = int(raw_km * DELOAD_FACTOR) if is_deload else raw_km
+            cfg = phase_km[phase_name]
+            raw = (base_start_km if phase_name == "base" else cfg["min"]) + min(week_idx, 10) * cfg["step"]
+            raw = min(raw, cfg["max"])
+            is_deload = (week_idx + 1) % 4 == 0
+            km_target = int(raw * DELOAD_FACTOR) if is_deload else raw
+        vol_src = "dynamic"
 
-    # Recommended easy run km — distribute remaining km after quality + long
-    presc    = PHASE_PRESCRIPTIONS.get(phase_name, {})
-    q_max    = presc.get("quality_max", 1)
-    q_km_est = q_max * 13          # ~13km per quality session (WU+quality+CD)
-    long_km  = presc.get("long_km", 20)
-    easy_days = 3 if q_max == 1 else 2   # Thu is quality2 in quality+ phases
-    remaining  = max(0, km_target - long_km - q_km_est)
-    easy_km    = max(6, min(14, round(remaining / max(1, easy_days) / 2) * 2))
+    # Long run: phase progression, then the JD cap (≤25–30 % of the week and
+    # ≤150 min) outside taper; inside taper the taper profile caps it.
+    presc     = render_prescription(phase_name, weekly_km=km_target)
+    q_max     = presc.get("quality_max", 1)
+    long_plan = progressive_long_km(phase_info, monday) if phase_info else presc.get("long_km", 16)
+    long_km, long_capped = long_plan, None
+    if phase_name != "taper":
+        cap, why = long_run_cap(km_target, VDOT_PACES["E"])
+        if cap and long_plan > cap:
+            long_km = max(EASY_MIN_KM, int(cap))
+            long_capped = f"Long {long_plan}→{long_km} km ({why})"
+
+    ws = weekly_structure(q_max)
+    q_km = sum((presc.get(f"quality{i}") or {}).get("quality_km", 0) + WU_CD_KM
+               for i in (1, 2) if f"quality{i}" in ws.values())
+    easy_days = sum(1 for v in ws.values() if v in ("easy", "easy+strides"))
+    remaining = max(0, km_target - long_km - q_km)
+    easy_km   = max(EASY_MIN_KM, min(EASY_MAX_KM, round(remaining / max(1, easy_days) / 2) * 2))
 
     return {
         "week_num":     week_idx + 1,
         "total_weeks":  total_weeks,
         "km_target":    km_target,
+        "volume_source": vol_src,
         "is_deload":    is_deload,
         "phase":        phase_name,
         "days_to_race": days_to_race,
+        "weeks_to_race": weeks_to_race,
         "race_name":    race["name"],
         "race_date":    str(race_date),
         "easy_km":      easy_km,
+        "long_km":      long_km,
+        "long_capped":  long_capped,
+        "phase_info":   phase_info,
+        "prescription": presc,
+        "structure":    ws,
     }
+
+
+def get_week_info(monday: date = None) -> dict:
+    """Week context for the active A-race (races.json) — see week_plan()."""
+    return week_plan(monday)
 
 
 def build_chart(race_key: str, target_date: date, num_weeks: int):
@@ -465,11 +506,11 @@ def build_chart(race_key: str, target_date: date, num_weeks: int):
     today = date.today()
     start = today - timedelta(days=today.weekday())
 
-    # Load actual weekly km from running_activities_all.json
-    acts_path = os.path.join(os.path.dirname(__file__), "..", "running_activities_all.json")
+    # Actual weekly km — shared activity loader
+    from activity_loader import load_activities_merged
     actual_by_week: dict[str, float] = {}
     try:
-        acts = _json.loads(open(acts_path).read())
+        acts = load_activities_merged()
         for a in acts:
             dist_km = (a.get("distance") or 0) / 1000
             ts = a.get("startTimeLocal", "")[:10]

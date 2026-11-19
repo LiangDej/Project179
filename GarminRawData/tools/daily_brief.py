@@ -22,57 +22,14 @@ COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
 
-from config import (ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS,  # noqa: E402
-                    PHASE_PRESCRIPTIONS, get_current_phase)
+from config import ATHLETE, DAY_NUTRITION  # noqa: E402
+# ONE readiness engine + ONE day prescription (v1.8) — re-exported for callers/tests
+from readiness import (readiness_assess, readiness_decision,  # noqa: E402,F401
+                       RHR_WARN_DELTA, RHR_HIGH_DELTA, active_races, active_taper)
 from garmin_client import get_client, get_health_cached    # noqa: E402
 from hrv_trend import readiness_hrv, night_hrv_state, rhr_baseline  # noqa: E402
 
-# SINGLE SOURCE: races.json via race_registry (active races only).
-try:
-    from race_registry import list_races
-    RACE_DATES = [{"name": r["name"], "date": date.fromisoformat(r["date"])}
-                  for _, r in list_races(active_only=True)]
-    if not RACE_DATES:
-        raise ValueError("no active races in races.json")
-except Exception:
-    # Fallback only fires if race_registry itself is broken/empty — must NOT
-    # point at an archived race (e.g. old "atm") or every tool downstream
-    # silently counts down to a race that no longer exists.
-    RACE_DATES = [{"name": "⚠️ No active race configured — check races.json", "date": date.today() + timedelta(days=365)}]
-
-WEEKLY_PLAN = {
-    0: {"day": "จันทร์",   "type": "strength",     "label": "🏋️ Strength & Conditioning",   "note": "งดวิ่ง เสริมกล้ามเนื้อ Functional"},
-    1: {"day": "อังคาร",  "type": "quality1",     "label": "🔥 Quality Run #1 หรือ Easy",  "note": "ประเมินจาก BB/HRV ก่อน", "default_quality": "T"},
-    2: {"day": "พุธ",     "type": "easy",         "label": "🟢 Easy Run",                   "note": f"ฟื้นฟู HR < {HR_ZONE_BOUNDS['Z1_E'][1]}"},
-    3: {"day": "พฤหัสบดี","type": "quality2",     "label": "🔥 Quality Run #2 หรือ Easy",  "note": "ประเมินจาก BB/HRV ก่อน", "default_quality": "I"},
-    4: {"day": "ศุกร์",   "type": "rest",         "label": "🛌 REST DAY",                   "note": "พักผ่อน 100% ห้ามซ้อม"},
-    5: {"day": "เสาร์",   "type": "easy+strides", "label": "🟢 Easy + Strides",            "note": f"8km E-Pace (HR < {HR_ZONE_BOUNDS['Z1_E'][1]}) + 6×Strides"},
-    6: {"day": "อาทิตย์", "type": "long",         "label": "📏 Long Run",                   "note": "เน้น E-Pace หรือผสม M-Pace"},
-}
-
-# Nutrition protocols — loaded from athlete.json (single source of truth),
-# same pattern as session_prescriber.py. Never hardcode a product name here —
-# athlete.json's quality_nutrition/long_run_nutrition define the real product.
-try:
-    import json as _json_db
-    _aj_db = _json_db.loads((BASE_DIR / "athlete.json").read_text(encoding="utf-8"))
-    _q_db  = _aj_db.get("quality_nutrition", {})
-    _l_db  = _aj_db.get("long_run_nutrition", {}).get("outdoor", {})
-    _q_pre60_db, _q_pre15_db = _q_db.get("pre_60min", "Palatinose 20g"), _q_db.get("pre_15min", "Prevo 1 cap")
-    _l_pre60_db, _l_pre15_db = _l_db.get("pre_60min", "Palatinose 30g"), _l_db.get("pre_15min", "Prevo 1 cap")
-except Exception:
-    _q_pre60_db, _q_pre15_db = "Palatinose 20g", "Prevo 1 cap"
-    _l_pre60_db, _l_pre15_db = "Palatinose 30g", "Prevo 1 cap"
-
-NUTRITION = {
-    "quality1":     f"☕ กาแฟดำ + {_q_pre60_db} (T-60) → 💊 {_q_pre15_db} + น้ำ 150ml (T-15)",
-    "quality2":     f"☕ กาแฟดำ + {_q_pre60_db} (T-60) → 💊 {_q_pre15_db} + น้ำ 150ml (T-15)",
-    "easy":         "☕ กาแฟดำ เท่านั้น (ไม่ต้องเติม Palatinose)",
-    "easy+strides": "☕ กาแฟดำ เท่านั้น (ไม่ต้องเติม Palatinose)",
-    "long":         f"☕ กาแฟดำ + {_l_pre60_db} (T-60) → 💊 {_l_pre15_db} + น้ำ 150ml (T-15)",
-    "strength":     "โปรตีน 20-30g หลังซ้อม + น้ำ 300ml",
-    "rest":         "น้ำเปล่า 2.5L ตลอดวัน ไม่ต้องทำอะไรพิเศษ",
-}
+RACE_DATES = active_races()
 
 
 # ---------------------------------------------------------------------------
@@ -92,169 +49,10 @@ def get_race_countdown():
     ]
 
 
-def get_taper_phase():
-    today = date.today()
-    for r in RACE_DATES:
-        delta = (r["date"] - today).days
-        if 0 <= delta <= 10:
-            return r["name"], delta
-    return None, None
-
-
-RHR_WARN_DELTA = 5    # bpm above baseline → no quality today
-RHR_HIGH_DELTA = 8    # bpm above baseline → easy/short only (illness/overreach signal)
-
-
-def readiness_assess(bb, hrv_status, day_type, pain="none", taper_days=None,
-                     rhr=None, rhr_baseline=None):
-    """Evaluate EVERY readiness rule and return the STRICTEST outcome.
-
-    v1.5 returned on the first matching rule, so a mild-pain "Easy 6–8 km"
-    masked stricter signals (RHR +11, HRV unbalanced) — 2026-11-17. Now all
-    rules vote; REST beats MODIFY beats CAUTION beats GO, and among MODIFYs
-    the smallest distance cap wins. Other triggered reasons are kept so the
-    brief shows all of them.
-
-    Returns dict: decision, reason, cap_km (None = no cap), others [str].
-    """
-    if day_type == "rest":
-        return {"decision": "REST", "reason": "🛌 วันพักตามตาราง ห้ามซ้อมเด็ดขาด",
-                "cap_km": 0, "others": []}
-    if day_type == "strength":
-        if bb is not None and bb < 30:
-            return {"decision": "MODIFY", "reason": "🟡 BB ต่ำมาก — ลด Weight Training เหลือ Mobility เท่านั้น",
-                    "cap_km": None, "others": []}
-        return {"decision": "GO", "reason": "✅ ทำ Strength ตามแผน", "cap_km": None, "others": []}
-
-    is_q    = day_type in ("quality1", "quality2")
-    is_hard = is_q or day_type == "long"
-    hrv     = (hrv_status or "unknown").lower()
-    rhr_d   = round(rhr - rhr_baseline, 1) if (rhr and rhr_baseline) else None
-    votes   = []   # (decision, cap_km, msg)
-
-    if bb is None:
-        votes.append(("CAUTION", None, "⚠️ ไม่พบข้อมูล Body Battery — ใช้ความรู้สึกตัวเองตัดสิน"))
-    if taper_days is not None and taper_days <= 10 and is_q:
-        votes.append(("MODIFY", 8, "🟡 ใกล้วันแข่ง (≤10 วัน) — ยกเลิก Quality ปรับเป็น Easy อัตโนมัติ"))
-    if pain in ("mild", "moderate") and is_hard:
-        votes.append(("MODIFY", 8 if pain == "mild" else 5,
-                      f"🟡 มีอาการบาดเจ็บ ({pain}) — ลดระดับเป็น Easy Run เท่านั้น"))
-    if rhr_d is not None:
-        if rhr_d >= RHR_HIGH_DELTA:
-            votes.append(("MODIFY", 6, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d:g} bpm — "
-                                       "ยังไม่ฟื้น/อาจป่วย: Easy สั้น ≤40 นาที หรือพัก"))
-        elif rhr_d >= RHR_WARN_DELTA and is_hard:
-            votes.append(("MODIFY", 8, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d:g} bpm — ตัด Quality/Long → Easy"))
-    if hrv == "unbalanced":
-        if bb is not None and bb < 30:
-            votes.append(("REST", 0, "🔴 HRV ต่ำกว่าช่วงปกติ + BB ต่ำมาก — ร่างกายล้าสะสม พักผ่อน 100%"))
-        else:
-            votes.append(("MODIFY", 8 if is_hard else 6,
-                          "🟡 HRV เมื่อคืนต่ำกว่าช่วงปกติ — ระบบประสาทไม่พร้อม ปรับลดความหนักลง"))
-    if bb is not None:
-        if bb < 20:
-            votes.append(("REST", 0, "🔴 BB ต่ำมาก — พักผ่อน อย่าฝืน"))
-        elif bb < 40:
-            votes.append(("MODIFY", 6, "🟡 BB ต่ำ — Easy 6km HR < 140 เท่านั้น"))
-        elif (bb < 60 or hrv != "balanced") and is_q:
-            votes.append(("MODIFY", 8, "🟡 BB ปานกลาง/HRV ไม่ balanced — ลด Quality → Easy Run แทน"))
-
-    rank = {"REST": 3, "MODIFY": 2, "CAUTION": 1}
-    if votes:
-        votes.sort(key=lambda v: (-rank[v[0]], v[1] if v[1] is not None else 99))
-        d, cap, msg = votes[0]
-        return {"decision": d, "reason": msg, "cap_km": cap,
-                "others": [v[2] for v in votes[1:]]}
-    if is_q:
-        return {"decision": "GO", "reason": "✅ พร้อมเต็มที่ — วิ่ง Quality ตามแผน", "cap_km": None, "others": []}
-    return {"decision": "GO", "reason": "✅ พร้อม — วิ่งตามแผน", "cap_km": None, "others": []}
-
-
-def readiness_decision(bb, hrv_status, day_type, pain="none", taper_days=None,
-                       rhr=None, rhr_baseline=None):
-    """Back-compat wrapper → (decision, reason). See readiness_assess()."""
-    a = readiness_assess(bb, hrv_status, day_type, pain, taper_days, rhr, rhr_baseline)
-    return a["decision"], a["reason"]
-
-
-def build_action_plan(day_info, decision, day_type, taper_race, taper_days, cap_km=None):
-    plan = []
-
-    if decision == "REST":
-        plan.append(f"   📋 {day_info['label']}")
-        plan.append(f"   📌 {day_info['note']}")
-        return plan
-
-    if taper_race and day_type not in ("rest", "strength"):
-        plan.append(f"   ⚡ TAPER PHASE — {taper_days} วันก่อน {taper_race}")
-        plan.append(f"   📏 ลด Volume ลง {'30%' if taper_days > 7 else '50%'} ของ Peak Week")
-
-    phase_info   = get_current_phase()
-    phase_key    = phase_info["phase"] if phase_info else "quality"
-    prescription = PHASE_PRESCRIPTIONS.get(phase_key, PHASE_PRESCRIPTIONS["quality"])
-
-    if phase_info and day_type not in ("rest", "strength"):
-        plan.append(f"   🗓️  Phase: {phase_info['name']} — {prescription['focus']}")
-
-    if decision == "MODIFY" and day_type in ("quality1", "quality2", "long", "easy", "easy+strides"):
-        # Any downgraded running day → Easy, distance capped by the strictest
-        # readiness rule (was: long days ignored MODIFY and still printed a
-        # 12–16 km long run; caps like "≤40 min" were never applied).
-        pace_lo = format_pace(VDOT_PACES["E"][0])
-        pace_hi = format_pace(VDOT_PACES["E"][1])
-        hi = min(8, cap_km) if cap_km else 8
-        lo = max(3, hi - 2)
-        src = {"quality1": "Quality", "quality2": "Quality", "long": "Long Run"}.get(day_type, "Easy")
-        plan.append(f"   📋 Easy Run (ลดระดับจาก {src} ตาม readiness)")
-        plan.append(f"   ⏱️  ระยะ: {lo}.0–{hi}.0 km (หรือพัก) | Pace: {pace_lo}–{pace_hi} | HR: < {HR_ZONE_BOUNDS['Z1_E'][1]} bpm")
-    elif day_type in ("quality1", "quality2"):
-        q_override = day_info.get("quality_override")
-        if q_override:
-            q_type = q_override
-            p = {
-                "type": q_type,
-                "workout": (f"5×1km @ {format_pace(VDOT_PACES['I'][0])}–{format_pace(VDOT_PACES['I'][1])} | HR {HR_ZONE_BOUNDS['Z4_I'][0]}–{HR_ZONE_BOUNDS['Z4_I'][1]}"
-                            if q_type == "I" else
-                            f"4–6×8min @ {format_pace(VDOT_PACES['T'][0])}–{format_pace(VDOT_PACES['T'][1])} | HR {HR_ZONE_BOUNDS['Z3_T'][0]}–{HR_ZONE_BOUNDS['Z3_T'][1]}"),
-                "note": "(--type override)",
-            }
-        else:
-            p      = prescription.get(day_type, prescription.get("quality1"))
-            q_type = p.get("type", "T")
-
-        if q_type == "easy":
-            plan.append(f"   📋 Easy Run ({p.get('note','')})")
-            plan.append(f"   ⏱️  6km | HR < {HR_ZONE_BOUNDS['Z1_E'][1]}")
-        elif q_type in ("E+strides", "e+strides"):
-            plan.append(f"   📋 {p['workout']}")
-            plan.append(f"   📌 {p.get('note','')}")
-        else:
-            plan.append(f"   📋 Quality — {p['workout']}")
-            plan.append(f"   📌 {p.get('note','')}")
-    elif day_type == "easy":
-        pace_lo = format_pace(VDOT_PACES["E"][0])
-        pace_hi = format_pace(VDOT_PACES["E"][1])
-        dist = 6 if taper_race else 8
-        plan.append("   📋 Easy Run")
-        plan.append(f"   ⏱️  ระยะ: {dist}.0 km | Pace: {pace_lo}–{pace_hi} | HR: < {HR_ZONE_BOUNDS['Z1_E'][1]} bpm")
-    elif day_type == "easy+strides":
-        dist = 6 if taper_race else 8
-        plan.append("   📋 Easy Run + Strides")
-        pace_lo = format_pace(VDOT_PACES["E"][0])
-        pace_hi = format_pace(VDOT_PACES["E"][1])
-        plan.append(f"   ⏱️  {dist}.0 km @ {pace_lo}–{pace_hi} | HR < {HR_ZONE_BOUNDS['Z1_E'][1]} + 6×Strides")
-        plan.append("   📌 Strides: เร่ง 15-20วิ (R-effort, ไม่ใช่ sprint) แล้วค่อยๆ ผ่อน")
-    elif day_type == "long":
-        long_km   = prescription.get("long_km", 16) if not taper_race else 12
-        long_note = prescription.get("long_note", f"E-Pace | HR < {HR_ZONE_BOUNDS['Z1_E'][1]}")
-        plan.append("   📋 Long Run")
-        plan.append(f"   ⏱️  {long_km}.0 km | {long_note}")
-    elif day_type == "strength":
-        plan.append("   📋 Strength & Conditioning")
-        plan.append("   💪 Squat 3×10 | RDL 3×10 | TKE 3×15 | Hip Thrust 3×12")
-        plan.append("   📌 เน้น Form เพื่อ protect ACL ไม่ใช่ Heavy Weight")
-
-    return plan
+def get_taper_phase(on_date: date | None = None):
+    """(race name, days) if on_date is inside that race's TIER taper window."""
+    name, days, _ = active_taper(on_date or date.today(), RACE_DATES)
+    return name, days
 
 
 # ---------------------------------------------------------------------------
@@ -266,8 +64,6 @@ def main():
     parser.add_argument("--pain", choices=["none", "mild", "moderate"],
                         default=ATHLETE.get("pain_status", "none"),
                         help="Overrides athlete.json → pain_status for this run only")
-    parser.add_argument("--type", choices=["T", "I"], default=None, dest="quality_type",
-                        help="Override quality session type")
     parser.add_argument("--offline", action="store_true",
                         help="ใช้ health cache เท่านั้น ไม่ต่อ Garmin (ใช้เมื่อ API ไม่พร้อม)")
     parser.add_argument("--fresh", action="store_true",
@@ -277,12 +73,10 @@ def main():
 
     today     = date.today()
     today_str = today.strftime("%Y-%m-%d")
-    weekday   = today.weekday()
-    day_info  = WEEKLY_PLAN[weekday].copy()
-    day_type  = day_info["type"]
-
-    if args.quality_type and day_type in ("quality1", "quality2"):
-        day_info["quality_override"] = args.quality_type
+    from session_prescriber import prescribe_day, WEEKDAY_TH
+    from training_planner import get_week_info as _get_week_info
+    _wi = _get_week_info()
+    day_type = _wi["structure"][today.weekday()]
 
     SEP  = "─" * 55
     taper_race, taper_days = get_taper_phase()
@@ -290,7 +84,7 @@ def main():
 
     # --- Header ---
     print(f"\n{'═'*55}")
-    print(f"🌅 DAILY BRIEF — {today_str} ({day_info['day']}){taper_tag}")
+    print(f"🌅 DAILY BRIEF — {today_str} ({WEEKDAY_TH[today.weekday()]}){taper_tag}")
     if args.offline:
         print("   📦 OFFLINE MODE")
     if args.pain != "none":
@@ -460,25 +254,15 @@ def main():
     print(f"\n{SEP}")
     print("📊 WEEKLY VOLUME (7-day rolling)")
     try:
-        import json as _json
-        from training_planner import get_week_info as _get_week_info
-
-        _wi          = _get_week_info()
+        from activity_loader import load_activities_merged
         _km_target   = _wi["km_target"]
         _phase       = _wi["phase"]
         _is_deload   = _wi["is_deload"]
         _week_num    = _wi["week_num"]
         _total_weeks = _wi["total_weeks"]
-
-        _acts_path = BASE_DIR / "running_activities_all.json"
         _week_start = today - timedelta(days=today.weekday())   # Monday
-        _done_km = 0.0
-        if _acts_path.exists():
-            for a in _json.loads(_acts_path.read_text()):
-                _d = (a.get("distance") or 0) / 1000.0
-                _ts = a.get("startTimeLocal", "")[:10]
-                if _ts and _ts >= _week_start.isoformat() and _ts <= today.isoformat():
-                    _done_km += _d
+        _done_km = sum((a.get("distance") or 0) / 1000.0 for a in load_activities_merged()
+                       if _week_start.isoformat() <= (a.get("startTimeLocal") or "")[:10] <= today.isoformat())
         _done_km = round(_done_km, 1)
         _remain  = max(0.0, _km_target - _done_km)
         _days_left = max(0, 6 - today.weekday())
@@ -515,18 +299,26 @@ def main():
     except Exception:
         print("   ⚠️  ไม่สามารถตรวจสอบได้")
 
-    # --- Training Decision + Plan ---
-    _ra = readiness_assess(bb, readiness_hrv(health), day_type, args.pain, taper_days,
-                           rhr=rhr, rhr_baseline=_rb)
-    decision, reason = _ra["decision"], _ra["reason"]
+    # --- Training Decision + Plan (same engine as the weekly plan) ---
+    _s = prescribe_day(today, _wi, bb, readiness_hrv(health), args.pain, rhr, _rb, live=True)
+    decision = _s["decision"]
     print(f"\n{SEP}")
     print(f"🎯 TODAY'S PLAN{taper_tag}")
-    print(f"   {reason}")
-    for _o in _ra["others"]:
+    if _s.get("reason"):
+        print(f"   {_s['reason']}")
+    for _o in _s.get("others", []):
         print(f"   ↳ ร่วมด้วย: {_o}")
-    plan = build_action_plan(day_info, decision, day_type, taper_race, taper_days, cap_km=_ra["cap_km"])
-    for line in plan:
-        print(line)
+    if _s.get("taper_note"):
+        print(f"   {_s['taper_note']}")
+    if _wi.get("phase_info"):
+        print(f"   🗓️  Phase: {_wi['phase_info']['name']} — {_wi['prescription'].get('focus', '')}")
+    print(f"   📋 {_s.get('label', '')}")
+    if _s.get("workout"):
+        print(f"   ⏱️  {_s['workout']}")
+    if _s.get("note"):
+        print(f"   📌 {_s['note']}")
+    for _n in _s.get("jd_notes") or []:
+        print(f"   ✂️  {_n}")
 
     # Standing athlete constraints (athlete.json → coaching_constraints) —
     # printed every brief so an LLM coach reading this output can't drift
@@ -549,14 +341,14 @@ def main():
             pass
 
     # --- Nutrition ---
-    nutrition_key = day_type if decision != "MODIFY" else "easy"
     print(f"\n{SEP}")
     print("💊 NUTRITION")
-    print(f"   Pre : {NUTRITION.get(nutrition_key, 'N/A')}")
-    print("   Post: BAAM ISO 1 scoop + น้ำ 200ml")
+    print(f"   Pre : {_s.get('nutrition', '-')}")
+    if day_type not in ("rest",):
+        print(f"   Post: {DAY_NUTRITION['post_run']}")
 
     # --- Taper Monitor ---
-    if taper_days is not None and taper_days <= 10:
+    if taper_days is not None:
         print(f"\n{SEP}")
         print(f"⏱️  TAPER MONITOR (T-{taper_days} วัน)")
         try:
@@ -570,7 +362,8 @@ def main():
                 _race_date = today + timedelta(days=taper_days)
             _mileage = _get_week_mileage()
             _peak    = _get_peak_week_km()
-            _taper   = analyze_taper(taper_days, bb, _mileage, _peak, _race_name, _race_date)
+            _, _, _prof = active_taper(today, RACE_DATES)
+            _taper   = analyze_taper(taper_days, bb, _mileage, _peak, _race_name, _race_date, _prof)
             print(f"   Status : {_taper['status']}")
             print(f"   Volume : {_taper['actual_km_this_week']}/{_taper['target_km_this_week']} km สัปดาห์นี้")
             if _taper.get("bb_race_projection"):

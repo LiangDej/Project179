@@ -42,9 +42,10 @@ K_ATL = 1 - math.exp(-1 / 7)    # τ = 7  days (Fatigue)
 
 
 def load_activities():
-    """File history + live Garmin overlay (กัน stale snapshot หลอก ATL/TSB) — shared loader."""
-    from activity_loader import load_activities_merged
-    return load_activities_merged()
+    """Runs + cardio cross-training (file + live) — PMC is physiological load,
+    so an elliptical session counts (v1.8; was runs only)."""
+    from activity_loader import load_load_activities
+    return load_load_activities()
 
 
 def calc_hr_tss(act):
@@ -95,6 +96,29 @@ def calc_pmc(tss_map, start_date, end_date):
         cur += timedelta(days=1)
 
     return result
+
+
+# ACWR (Williams et al. 2017, BJSM 51:209): EWMA with λ = 2/(N+1), acute N=7,
+# chronic N=28 — the windows the 0.8–1.3 / 1.5 thresholds (Gabbett 2016) were
+# derived on. NOT ATL/CTL (τ 7/42): a 42-day chronic window reads lower ratios.
+ACWR_ACUTE_N, ACWR_CHRONIC_N = 7, 28
+
+
+def ewma_acwr(activities=None, today=None, warmup_days: int = 120):
+    """(acwr, acute, chronic) from daily hrTSS (runs + cardio cross-training)."""
+    today = today or date.today()
+    activities = activities if activities is not None else load_activities()
+    start = today - timedelta(days=warmup_days)
+    tss = daily_tss_map(activities, start, today)
+    la, lc = 2 / (ACWR_ACUTE_N + 1), 2 / (ACWR_CHRONIC_N + 1)
+    a = c = 0.0
+    cur = start
+    while cur <= today:
+        x = tss.get(cur.strftime("%Y-%m-%d"), 0.0)
+        a = x * la + (1 - la) * a
+        c = x * lc + (1 - lc) * c
+        cur += timedelta(days=1)
+    return (round(a / c, 2) if c > 0 else None), round(a, 1), round(c, 1)
 
 
 # Warmup so CTL (42-day EWMA) effectively fully converges (~5×τ) before 'today'.

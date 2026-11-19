@@ -30,6 +30,7 @@ Thumbs.db
 # Large Garmin activity dump (regenerated from Garmin Connect, not source of truth)
 GarminRawData/running_activities_all.json
 GarminRawData/running_activities_all.json.sha256
+GarminRawData/cross_training_all.json
 
 # Garmin health/lap cache (lives in ~/.config/garmin-coach/ but just in case)
 health_cache/
@@ -41,6 +42,7 @@ GarminRawData/SessionCache/
 # Personal athlete data — copy *.example.json → *.json and fill in your values
 GarminRawData/athlete.json
 GarminRawData/races.json
+GarminRawData/training_plan.json
 
 # Personal training logs (generated locally, never committed)
 GarminRawData/QualitySessionLog/

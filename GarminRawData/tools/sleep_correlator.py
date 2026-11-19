@@ -16,7 +16,6 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))
 CACHE_DIR = Path(__file__).resolve().parent.parent / "wellness"
-ACTS_FILE = Path(__file__).parent.parent / "running_activities_all.json"
 
 
 # ---------------------------------------------------------------------------
@@ -106,10 +105,8 @@ def load_health(days: int = 90) -> dict:
 # Load activities
 # ---------------------------------------------------------------------------
 def load_activities() -> list:
-    if not ACTS_FILE.exists():
-        return []
-    with open(ACTS_FILE) as f:
-        return json.load(f)
+    from activity_loader import load_activities_merged
+    return load_activities_merged()
 
 
 # ---------------------------------------------------------------------------

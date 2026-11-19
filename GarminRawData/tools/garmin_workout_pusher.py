@@ -82,6 +82,34 @@ def speed_target(pace_slow: str, pace_fast: str) -> dict:
         "targetValueTwo": pace_to_ms(pace_fast),   # upper speed bound (faster pace)
     }
 
+# ── Paces from VDOT (config → vdot_math) — no literal paces in this file ─────
+
+def _fmt_sec(sec_km: float) -> str:
+    sec_km = int(round(sec_km))
+    return f"{sec_km // 60}:{sec_km % 60:02d}"
+
+
+PACE = {k: (_fmt_sec(v[1]), _fmt_sec(v[0])) for k, v in VDOT_PACES.items()}  # zone → (slow, fast)
+JOG_NOTE    = tm_note(*PACE["E"])          # warm-up / cool-down / recovery jog
+STRIDE_NOTE = tm_note(*PACE["R"])          # strides = R pace
+
+
+def _rest_secs(rest: str | None) -> int:
+    """'90s' / '2min' / '400m jog' → seconds (distance jogs at the slow E pace)."""
+    if not rest:
+        return 120
+    r = rest.lower()
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(s|sec|min|m)\b", r)
+    if not m:
+        return 120
+    v, unit = float(m.group(1)), m.group(2)
+    if unit in ("s", "sec"):
+        return int(v)
+    if unit == "min":
+        return int(v * 60)
+    return int(v / pace_to_ms(PACE["E"][0]))   # metres of jog
+
+
 # ── Step builders ────────────────────────────────────────────────────────────
 
 def _base(order: int, stype: tuple, child_id=None) -> dict:
@@ -227,11 +255,11 @@ def wrap_workout(name: str, steps: list, est_secs: int) -> RunningWorkout:
 def build_easy(name, dist_km, pace_slow, pace_fast):
     """WU 5min → Easy dist_km (speed target) → CD 5min"""
     steps = [
-        warmup_step(1, 300, f"Warm up easy 5min — {tm_note('7:00', '6:30')}"),
+        warmup_step(1, 300, f"Warm up easy 5min — {JOG_NOTE}"),
         active_dist_step(2, dist_km * 1000,
                          desc=f"Easy {dist_km}km @ {pace_slow}–{pace_fast} | {tm_note(pace_slow, pace_fast)}",
                          pace_slow=pace_slow, pace_fast=pace_fast),
-        cooldown_step(3, 300, f"Cool down easy 5min — {tm_note('7:00', '6:30')}"),
+        cooldown_step(3, 300, f"Cool down easy 5min — {JOG_NOTE}"),
     ]
     est = 300 + int(dist_km * 1000 / pace_to_ms(pace_fast)) + 300
     return wrap_workout(name, steps, est)
@@ -248,19 +276,19 @@ def build_threshold(name, reps, rep_min, t_slow, t_fast, rec_sec=120, skip_warmu
     order = 1
     steps = []
     if not skip_warmup:
-        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {tm_note('7:00', '6:30')}"))
+        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {JOG_NOTE}"))
         order += 1
-        steps.append(active_time_step(order, 120, f"2×stride to wake up legs — {tm_note('5:30', '5:00')}"))
+        steps.append(active_time_step(order, 120, f"2×stride to wake up legs — {STRIDE_NOTE}"))
         order += 1
     rgroup = repeat_group(order, reps, [
         interval_step(order + 1, 1, secs=rep_sec,
                       desc=f"T-pace {rep_min}min @ {t_slow}–{t_fast} | {tm_note(t_slow, t_fast)}",
                       pace_slow=t_slow, pace_fast=t_fast),
-        recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {tm_note('7:00', '6:30')}"),
+        recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {JOG_NOTE}"),
     ])
     steps.append(rgroup)
     order += 1
-    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {tm_note('7:00', '6:30')}"))
+    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {JOG_NOTE}"))
     est = (0 if skip_warmup else 1020) + reps * (rep_sec + rec_sec) + 600
     return wrap_workout(name, steps, est)
 
@@ -275,19 +303,19 @@ def build_interval(name, reps, rep_dist_m, i_slow, i_fast, rec_sec=180, skip_war
     order = 1
     steps = []
     if not skip_warmup:
-        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {tm_note('7:00', '6:30')}"))
+        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {JOG_NOTE}"))
         order += 1
-        steps.append(active_time_step(order, 120, f"2×stride — {tm_note('5:30', '5:00')}"))
+        steps.append(active_time_step(order, 120, f"2×stride — {STRIDE_NOTE}"))
         order += 1
     rgroup = repeat_group(order, reps, [
         interval_step(order + 1, 1, dist_m=rep_dist_m,
                       desc=f"Interval {rep_dist_m}m @ {i_slow}–{i_fast} | {tm_note(i_slow, i_fast)}",
                       pace_slow=i_slow, pace_fast=i_fast),
-        recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {tm_note('7:00', '6:30')}"),
+        recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {JOG_NOTE}"),
     ])
     steps.append(rgroup)
     order += 1
-    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {tm_note('7:00', '6:30')}"))
+    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {JOG_NOTE}"))
     est = (0 if skip_warmup else 1020) + reps * (int(rep_dist_m / pace_to_ms(i_fast)) + rec_sec) + 600
     return wrap_workout(name, steps, est)
 
@@ -295,16 +323,16 @@ def build_interval(name, reps, rep_dist_m, i_slow, i_fast, rec_sec=180, skip_war
 def build_easy_strides(name, easy_km, pace_slow, pace_fast, n_strides=6):
     """WU → Easy km (speed target) → N×(20s stride / 90s jog) → CD"""
     rgroup = repeat_group(3, n_strides, [
-        interval_step(4, 1, secs=20, desc=f"Stride 20s — quick feet | {tm_note('5:00', '4:30')}"),
-        recovery_step(5, 1, 90, desc=f"Walk/jog recovery 90s — {tm_note('7:00', '6:30')}"),
+        interval_step(4, 1, secs=20, desc=f"Stride 20s — quick feet | {STRIDE_NOTE}"),
+        recovery_step(5, 1, 90, desc=f"Walk/jog recovery 90s — {JOG_NOTE}"),
     ])
     steps = [
-        warmup_step(1, 300, f"Warm up easy 5min — {tm_note('7:00', '6:30')}"),
+        warmup_step(1, 300, f"Warm up easy 5min — {JOG_NOTE}"),
         active_dist_step(2, easy_km * 1000,
                          desc=f"Easy {easy_km}km @ {pace_slow}–{pace_fast} | {tm_note(pace_slow, pace_fast)}",
                          pace_slow=pace_slow, pace_fast=pace_fast),
         rgroup,
-        cooldown_step(6, 300, f"Cool down easy 5min — {tm_note('7:00', '6:30')}"),
+        cooldown_step(6, 300, f"Cool down easy 5min — {JOG_NOTE}"),
     ]
     est = 300 + int(easy_km * 1000 / pace_to_ms(pace_fast)) + n_strides * (20 + 90) + 300
     return wrap_workout(name, steps, est)
@@ -313,39 +341,70 @@ def build_easy_strides(name, easy_km, pace_slow, pace_fast, n_strides=6):
 def build_long(name, dist_km, pace_slow, pace_fast):
     """WU 5min → Long dist_km → CD 5min"""
     steps = [
-        warmup_step(1, 300, f"Warm up easy 5min — {tm_note('7:00', '6:30')}"),
+        warmup_step(1, 300, f"Warm up easy 5min — {JOG_NOTE}"),
         active_dist_step(2, dist_km * 1000,
                          desc=f"Long run {dist_km}km @ {pace_slow}–{pace_fast} | {tm_note(pace_slow, pace_fast)}",
                          pace_slow=pace_slow, pace_fast=pace_fast),
-        cooldown_step(3, 300, f"Cool down easy 5min — {tm_note('7:00', '6:30')}"),
+        cooldown_step(3, 300, f"Cool down easy 5min — {JOG_NOTE}"),
     ]
     est = 300 + int(dist_km * 1000 / pace_to_ms(pace_fast)) + 300
     return wrap_workout(name, steps, est)
 
 
 def build_tt(name="30-min TT — LT2 Calibration"):
-    """WU → TT 6×5min laps (speed target) → CD 10min"""
-    # 5:15 start, 5:10 after lap 2
-    rgroup_1 = repeat_group(3, 2, [
-        interval_step(4, 1, secs=300, desc="TT Phase — 5:15/km start",
-                      pace_slow="5:20", pace_fast="5:10"),
-        active_time_step(5, 1, "lap", child_id=1),  # auto-lap marker
-    ])
-    # Use simpler approach: 6 separate 5-min steps for clarity
-    steps = [
-        warmup_step(1, 600, "Warm up easy 10min @ 8.0 km/h"),
-        active_time_step(2, 180, "Build 3min @ 9.2–10.0 km/h"),
-        # TT: 6×5min laps
-        interval_step(3, None, secs=300, desc="TT Lap 1/6 — 5:15/km (11.4 km/h)", pace_slow="5:20", pace_fast="5:10"),
-        interval_step(4, None, secs=300, desc="TT Lap 2/6 — 5:15/km adjust if needed", pace_slow="5:20", pace_fast="5:10"),
-        interval_step(5, None, secs=300, desc="TT Lap 3/6 — 5:10/km (11.6 km/h) ★ LT2 window", pace_slow="5:15", pace_fast="5:05"),
-        interval_step(6, None, secs=300, desc="TT Lap 4/6 — hold pace ★ LT2", pace_slow="5:15", pace_fast="5:05"),
-        interval_step(7, None, secs=300, desc="TT Lap 5/6 — hold pace ★ LT2", pace_slow="5:15", pace_fast="5:05"),
-        interval_step(8, None, secs=300, desc="TT Lap 6/6 — finish strong ★ LT2", pace_slow="5:15", pace_fast="5:05"),
-        cooldown_step(9, 600, "Cool down easy 10min"),
-    ]
-    est = 600 + 180 + 6 * 300 + 600
-    return wrap_workout(name, steps, est)
+    """WU → 30-min TT as 6×5min laps (start at the slow edge of T, settle into
+    T from lap 3 — Friel LTHR test) → CD 10min. Paces from current VDOT."""
+    t_slow, t_fast = PACE["T"]
+    t_tol = _fmt_sec(VDOT_PACES["T"][1] + 5)
+    laps = []
+    for i in range(6):
+        slow, fast = (t_tol, t_slow) if i < 2 else (t_slow, t_fast)
+        tag = " ★ LT2 window" if i >= 2 else ""
+        laps.append(interval_step(3 + i, None, secs=300,
+                                  desc=f"TT Lap {i + 1}/6 — {fast}–{slow}/km ({tm_note(slow, fast)}){tag}",
+                                  pace_slow=slow, pace_fast=fast))
+    steps = [warmup_step(1, 600, f"Warm up easy 10min — {JOG_NOTE}"),
+             active_time_step(2, 180, f"Build 3min → T — {tm_note(PACE['M'][0], PACE['T'][0])}"),
+             *laps,
+             cooldown_step(9, 600, f"Cool down easy 10min — {JOG_NOTE}")]
+    return wrap_workout(name, steps, 600 + 180 + 6 * 300 + 600)
+
+
+def build_from_spec(name: str, spec: dict, skip_warmup: bool = False):
+    """Quality workout from a session `spec` (T/I/R/M or combo parts) — the
+    exact reps the planner settled on after JD caps; no text parsing."""
+    parts = spec.get("parts") or [spec]
+    order, steps, est = 1, [], 0
+    if not skip_warmup:
+        steps.append(warmup_step(order, 900, f"Warm up easy 15min — {JOG_NOTE}")); order += 1
+        steps.append(active_time_step(order, 120, f"2×stride to wake up legs — {STRIDE_NOTE}")); order += 1
+        est += 1020
+    for part in parts:
+        kind = part["type"]
+        slow, fast = PACE[kind]
+        reps = int(part.get("reps", 1))
+        rec = _rest_secs(part.get("rest"))
+        if part.get("rep_min"):
+            body = dict(secs=int(part["rep_min"] * 60)); lab = f"{part['rep_min']}min"
+            work = body["secs"]
+        else:
+            dist = int((part.get("rep_km") or part.get("km") or 0) * 1000 or part.get("rep_m", 0))
+            body = dict(dist_m=dist); lab = f"{dist}m"
+            work = int(dist / pace_to_ms(fast))
+        main = interval_step(order + 1, 1, desc=f"{kind}-pace {lab} @ {fast}–{slow} | {tm_note(slow, fast)}",
+                             pace_slow=slow, pace_fast=fast, **body)
+        if reps > 1:
+            steps.append(repeat_group(order, reps, [
+                main, recovery_step(order + 2, 1, rec, desc=f"Jog recovery {rec}s — {JOG_NOTE}")]))
+            est += reps * (work + rec)
+        else:
+            main["stepOrder"] = order
+            main["childStepId"] = None
+            steps.append(main)
+            est += work
+        order += 1
+    steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {JOG_NOTE}"))
+    return wrap_workout(name, steps, est + 600)
 
 # ── session_prescriber → workout mapper ──────────────────────────────────────
 
@@ -359,24 +418,25 @@ def session_to_workout(session: dict, skip_warmup: bool = False) -> dict | None:
         m, s = divmod(sec_km, 60)
         return f"{m}:{s:02d}"
 
-    # Pull VDOT paces dynamically from config
-    try:
-        e_slow = _fmt_pace_sec(VDOT_PACES["E"][1])
-        e_fast = _fmt_pace_sec(VDOT_PACES["E"][0])
-    except Exception:
-        e_slow, e_fast = "6:44", "5:37"   # VDOT 40 fallback
+    e_slow, e_fast = PACE["E"]
+    t_slow, t_fast = PACE["T"]
+    i_slow, i_fast = PACE["I"]
 
-    try:
-        t_slow = _fmt_pace_sec(VDOT_PACES["T"][1]) if len(VDOT_PACES["T"]) > 1 else _fmt_pace_sec(VDOT_PACES["T"][0])
-        t_fast = _fmt_pace_sec(VDOT_PACES["T"][0])
-    except Exception:
-        t_slow, t_fast = "5:10", "5:00"   # VDOT 40 fallback
+    # v1.8: sessions carry the final structured spec — use it, no regex.
+    spec = session.get("spec")
+    if spec:
+        st = spec.get("type")
+        if st == "easy":
+            return build_easy(f"Easy {spec['km']:g}km — {weekday} {date_s}", spec["km"], e_slow, e_fast)
+        if st == "E+strides":
+            return build_easy_strides(f"Easy+Strides — {weekday} {date_s}", spec["km"], e_slow, e_fast,
+                                      n_strides=spec.get("strides", 6))
+        if st == "long":
+            return build_long(f"Long Run {spec['km']:g}km — {weekday} {date_s}", spec["km"], e_slow, e_fast)
+        if st in ("T", "I", "R", "M", "combo"):
+            return build_from_spec(f"Quality {st} — {weekday} {date_s}", spec, skip_warmup)
 
-    try:
-        i_slow = _fmt_pace_sec(VDOT_PACES["I"][1]) if len(VDOT_PACES["I"]) > 1 else _fmt_pace_sec(VDOT_PACES["I"][0])
-        i_fast = _fmt_pace_sec(VDOT_PACES["I"][0])
-    except Exception:
-        i_slow, i_fast = "4:40", "4:31"   # VDOT 40 fallback
+    # Legacy plan files (no spec) — text parsing below.
 
     if stype == "easy":
         m = re.search(r"(\d+(?:\.\d+)?)km", workout)
@@ -456,7 +516,7 @@ def main():
         est_min = tt.estimatedDurationInSecs // 60
         print(f"\n{'='*60}")
         print(f"🏁 30-min TT — LT2 Calibration")
-        print(f"   Duration: ~{est_min} min | Start pace: 5:15/km (11.4 km/h)")
+        print(f"   Duration: ~{est_min} min | Start: T {PACE['T'][0]}/km ({tm_note(*PACE['T'])})")
         print(f"   LT2 window: Lap 3–6 (min 10–30)")
         print(f"   → avg HR min 10–30 = LT2 (TM conditions)")
         print(f"{'='*60}")

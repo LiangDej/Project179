@@ -1,7 +1,6 @@
 {
   "_comment": "SINGLE SOURCE OF TRUTH — copy this file to athlete.json and fill in your values. config.py reads athlete.json on import and derives paces/zones. Never edit config.py directly.",
   "_setup": "1) cp athlete.example.json athlete.json  2) Fill in your VDOT (from a recent race) and LTHR (from a Friel field test)  3) Run: .venv/bin/python3.13 ../tests/test_suite.py",
-
   "name": "Your Name",
   "vdot": 40,
   "_vdot_help": "Use a recent race result at vdoto2.com. Update after every race or TT — never from training pace alone.",
@@ -12,54 +11,46 @@
   "mhr": 195,
   "_mhr_help": "Max HR. Use peak HR from a hard interval session or hill sprint.",
   "weight_kg": 70.0,
-
   "pain_status": "none",
   "_pain_status_help": "none | mild | moderate — persisted injury state, read as the default for every tool's --pain flag (daily_brief.py, session_prescriber.py) so downgrades apply automatically without re-typing --pain on every call. Update this the moment an injury is confirmed or resolved.",
-
   "training_days_per_week": 5,
   "_training_days_help": "How many days/week you actually RUN (not counting a separate strength day). Used by training_planner.py to size session distribution — fewer days compress to 1 quality day, more days keep 2 quality + easy spread.",
-  "rest_days": ["friday"],
+  "rest_days": [
+    "friday"
+  ],
   "_rest_days_help": "Lowercase day names with ZERO training (no run, no strength). training_planner.py marks these REST.",
   "strength_day": "monday",
   "_strength_day_help": "Lowercase day name for strength/conditioning (non-running, not a rest day). Omit if you don't lift.",
-
   "vdot_source": "race_or_tt",
   "vdot_calibration_date": "YYYY-MM-DD",
   "vdot_calibration": "race",
   "lthr_date": "YYYY-MM-DD",
   "lthr_confidence": "MODERATE",
   "tt_scheduled": null,
-
   "fm_endurance_factor": 1.0,
   "_fm_endurance_factor_note": "actual FM time / VDOT-predicted FM time. Leave 1.0 until you have a marathon result; after each FM set it to actual/predicted (typ. 1.05-1.20 if long runs < 30 km).",
   "coaching_constraints": [],
   "_coaching_constraints_help": "Standing preferences the AI coach must not violate (e.g. \"no run/walk suggestions\"). Printed at the end of every daily brief.",
-
   "_zones_note": "HR zones are derived automatically by config.py from lthr/rhr/mhr above. Do not edit hr_zone_hrr_pct unless you know what you are doing.",
-  "hr_zone_hrr_pct": { "E": 0.79, "M": 0.862, "T": 0.921, "I": 0.95 },
-
+  "hr_zone_hrr_pct": {
+    "_comment": "M and I upper bounds as %HRR. E ceiling = JD 79% HRmax and T ceiling = LTHR are derived — not set here.",
+    "M": 0.862,
+    "I": 0.95
+  },
   "_paces_note": "Paces (sec/km) derived from VDOT 40 Jack Daniels table. Update after changing vdot — or let config.py recompute automatically if your version supports it.",
-  "vdot_paces_sec": {
-    "_help": "Jack Daniels VDOT 40 paces. Replace with values from your VDOT at vdoto2.com.",
-    "E": [337, 404],
-    "M": [316, 325],
-    "T": [300, 310],
-    "I": [271, 280],
-    "R": [260, 270]
-  },
-
   "nutrition_products": {
-    "_comment": "Na content of your electrolyte products in mg per unit. Field names below (prevo_na_mg, aminovital_na_mg) are just the original developer's products — the NAMES don't matter, put YOUR product's numbers in these same two fields regardless of brand (e.g. SaltStick Caps, Precision Fuel & Hydration, Maurten, GU Roctane, SIS — check each product's own label for its actual Na mg).",
-    "prevo_na_mg": 650,
-    "aminovital_na_mg": 90
+    "_comment": "Na content of your electrolyte products in mg per unit. Field names below (prevo_na_mg, aminovital_na_mg) are just the original developer's products — the NAMES don't matter, put YOUR product's numbers in these same two fields regardless of brand (e.g. SaltStick Caps, Precision Fuel & Hydration, Maurten, GU Roctane, SIS — check each product's own label for its actual Na mg). Elemental Na from the label (e.g. 215 mg per electrolyte cap), not the salt-compound weight.",
+    "prevo_na_mg": 215,
+    "aminovital_na_mg": 35,
+    "electrolyte_name": "Electrolyte cap",
+    "gel_name": "Gel",
+    "aminovital_carb_g": 25
   },
-
   "quality_nutrition": {
     "_comment": "Pre-run protocol for quality sessions (T/I/R, 60-80 min). Edit to match your products.",
     "pre_60min": "Carb source 20g (e.g. Palatinose, banana)",
     "pre_15min": "Electrolyte cap (e.g. 1× Precision Hydration 500)"
   },
-
   "race_day_nutrition": {
     "_comment": "Race morning pre-race protocol. Adjust timing and products to your stomach.",
     "pre_150min": "Carb source 25g",
@@ -75,7 +66,6 @@
       "skip_last_km": 2
     }
   },
-
   "long_run_nutrition": {
     "_comment": "Split protocol for treadmill vs outdoor. Update sweat_rate_L_hr from a weigh-in test (pre/post weight + fluid consumed).",
     "treadmill": {
@@ -98,5 +88,37 @@
       "total_na_mg": 0,
       "acsm_pct": 0
     }
-  }
+  },
+  "pace_overrides_sec": {
+    "_comment": "Leave empty: paces are derived from vdot (Jack Daniels formulas). Only add {zone:[fast,slow]} sec/km if you must override."
+  },
+  "sweat_na_mmol": 45,
+  "form_baselines": {
+    "_comment": "Your grading thresholds — cadence (spm), ground contact (ms), vertical ratio (%), power (W, null if no power meter).",
+    "cadence_min": 164,
+    "gct_max": 275,
+    "gct_treadmill_add": 20,
+    "vr_good": 8.5,
+    "vr_warn": 9.5,
+    "power_min": null,
+    "power_max": null,
+    "grade_cadence_s": 155,
+    "grade_cadence_a": 153
+  },
+  "lt2_test": {
+    "_comment": "Treadmill [avg_hr, pace_sec_per_km] points from your own LTHR/LT2 test — used to estimate treadmill pace from HR. Empty = feature off.",
+    "date": null,
+    "tm_hr_anchors": []
+  },
+  "session_nutrition": {
+    "_comment": "Per-session text shown in the brief/plan (quality/long built from quality_nutrition / long_run_nutrition.outdoor).",
+    "pre_base": "Coffee",
+    "easy": "Water only",
+    "strength": "20-30 g protein after",
+    "rest": "Hydrate normally",
+    "post_run": "Recovery drink",
+    "carb_load": "Extra carbs at dinner"
+  },
+  "strength_routine": "Squat 3×10 | RDL 3×10 | Hip Thrust 3×12",
+  "mobility_routine": "Foam roll 10min + hip mobility"
 }

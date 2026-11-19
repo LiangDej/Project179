@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.7.2-blue)
+![Version](https://img.shields.io/badge/version-1.8-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -94,7 +94,7 @@ From the PBs provided, estimate an initial VDOT and check whether it's consisten
 (e.g. 5K implies VDOT 44 but FM implies VDOT 38 → not consistent → which distance should we trust?)
 Then recommend the first Time Trial to run (distance + target pace) to confirm VDOT before locking training zones.
 
-Once all info is collected, copy athlete.example.json → athlete.json and races.example.json → races.json, then
+Once all info is collected, copy athlete.example.json → athlete.json, races.example.json → races.json and training_plan.example.json → training_plan.json, then
 **overwrite every relevant field with my real answers — leave no default/placeholder from the example file in
 place, not even one field** (including pain_status, training_days_per_week, rest_days, strength_day, and
 quality_nutrition/race_day_nutrition/long_run_nutrition — write real answers or "none"/"not used" over all of them).
@@ -418,7 +418,7 @@ No need to memorize these — the agent explains them every time it uses them. J
 ```
 
 **Protected files** (a convention for AI coding assistants during a live coaching session — see [CLAUDE.md](CLAUDE.md); human contributors should just open a PR normally):
-- `GarminRawData/tools/*.py` (all 31 tools)
+- `GarminRawData/tools/*.py` (all 33 tools)
 - `skills/garmin_coach_mcp/config.py` + `db_helper.py`
 
 CI runs automatically on every push and pull request via GitHub Actions.

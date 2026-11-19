@@ -1,0 +1,151 @@
+{
+  "_comment": "SINGLE SOURCE for the season plan (phases + workout specs). config.py reads this; workouts are specs, not text — paces/HR are filled from VDOT/zones at render time and reps are capped by JD rules (jd_rules.py). Edit freely; not protected code.",
+  "_spec_help": "quality type: T|I|R|M with reps + rep_min|rep_km|rep_m (+rest), or km; 'combo' with parts[]; 'E+strides' (km, strides); 'easy' (km). long: start_km→peak_km across the phase, m_finish_km = M-pace finish. weekly_km: [first week, last week] of the phase (km/wk) — deload every 4th week = 80 %, except taper.",
+  "phases": [
+    {
+      "name": "Base",
+      "start": "2026-07-06",
+      "end": "2026-08-30",
+      "phase": "base",
+      "weekly_km": [
+        30,
+        45
+      ]
+    },
+    {
+      "name": "Quality",
+      "start": "2026-08-31",
+      "end": "2026-10-11",
+      "phase": "quality",
+      "weekly_km": [
+        45,
+        55
+      ]
+    },
+    {
+      "name": "Race Specific",
+      "start": "2026-10-12",
+      "end": "2026-11-01",
+      "phase": "race_specific",
+      "weekly_km": [
+        55,
+        60
+      ]
+    },
+    {
+      "name": "Taper",
+      "start": "2026-11-02",
+      "end": "2026-11-15",
+      "phase": "taper",
+      "weekly_km": [
+        40,
+        25
+      ]
+    }
+  ],
+  "prescriptions": {
+    "base": {
+      "focus": "สร้าง Aerobic Base — Volume เป็นหลัก ยังไม่เน้น Intensity",
+      "quality_max": 1,
+      "quality1": {
+        "type": "T",
+        "rep_min": 10,
+        "reps": 3,
+        "rest": "2min",
+        "note": "Threshold volume — เน้น duration ไม่ใช่ intensity"
+      },
+      "quality2": {
+        "type": "E+strides",
+        "km": 10,
+        "strides": 6,
+        "note": "Base phase — ยังไม่ใช้ Interval"
+      },
+      "long": {
+        "start_km": 16,
+        "peak_km": 24,
+        "m_finish_km": 0,
+        "note": "100% E"
+      }
+    },
+    "quality": {
+      "focus": "เพิ่ม VO2max และ Lactate Threshold — 2 Quality ต่อสัปดาห์",
+      "quality_max": 2,
+      "quality1": {
+        "type": "T",
+        "rep_min": 8,
+        "reps": 5,
+        "rest": "90s",
+        "note": "Threshold intervals — lactate clearance"
+      },
+      "quality2": {
+        "type": "I",
+        "rep_km": 1.0,
+        "reps": 5,
+        "rest": "400m jog",
+        "note": "VO2max stimulus"
+      },
+      "long": {
+        "start_km": 26,
+        "peak_km": 30,
+        "m_finish_km": 5,
+        "note": ""
+      }
+    },
+    "race_specific": {
+      "focus": "จำลองสภาพการแข่งสนามไทย — Race-pace conditioning",
+      "quality_max": 2,
+      "quality1": {
+        "type": "T",
+        "rep_km": 3,
+        "reps": 3,
+        "rest": "3min",
+        "note": "Cruise intervals"
+      },
+      "quality2": {
+        "type": "combo",
+        "parts": [
+          {
+            "type": "I",
+            "rep_km": 1.0,
+            "reps": 3,
+            "rest": "400m jog"
+          },
+          {
+            "type": "M",
+            "km": 5
+          }
+        ],
+        "note": "Speed + race endurance"
+      },
+      "long": {
+        "start_km": 30,
+        "peak_km": 32,
+        "m_finish_km": 8,
+        "note": ""
+      }
+    },
+    "taper": {
+      "focus": "รักษา Sharpness ลด Volume — เน้นพักฟื้นก่อนแข่ง",
+      "quality_max": 1,
+      "quality1": {
+        "type": "T",
+        "rep_min": 10,
+        "reps": 2,
+        "rest": "2min",
+        "note": "Maintenance — คงความหนัก ลด volume (Bosquet 2007)"
+      },
+      "quality2": {
+        "type": "easy",
+        "km": 6,
+        "note": "Taper — quality2 เป็น easy"
+      },
+      "long": {
+        "start_km": 22,
+        "peak_km": 12,
+        "m_finish_km": 0,
+        "note": "ไม่เพิ่ม stress"
+      }
+    }
+  },
+  "_example_note": "Dates line up with races.example.json (A-race 2026-11-15): taper must END on the A-race day."
+}

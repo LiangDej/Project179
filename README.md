@@ -3,7 +3,7 @@
 An AI running coach that connects to your Garmin data and coaches you using Jack Daniels' Running Formula. Talk to any AI agent — it reads your data, runs the analytics tools, and coaches you with real numbers.
 
 ![CI](https://github.com/LiangDej/Project179/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/version-1.7.2-blue)
+![Version](https://img.shields.io/badge/version-1.8-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -93,7 +93,7 @@ Please set me up as a new athlete. Ask me the following one by one:
 (เช่น 5K บอก VDOT 44 แต่ FM บอก VDOT 38 → ไม่ consistent → ควรเชื่อระยะไหน)
 จากนั้นแนะนำ TT แรกที่ควรวิ่ง (ระยะ + เป้า) เพื่อยืนยัน VDOT ก่อน lock training zones
 
-เมื่อได้ข้อมูลครบ ให้ copy athlete.example.json → athlete.json และ races.example.json → races.json
+เมื่อได้ข้อมูลครบ ให้ copy athlete.example.json → athlete.json, races.example.json → races.json และ training_plan.example.json → training_plan.json
 แล้ว **overwrite ทุก field ที่เกี่ยวข้องด้วยคำตอบจริงของฉัน — ไม่เหลือ default/placeholder จากไฟล์ตัวอย่างค้างไว้แม้แต่ field เดียว**
 (รวมถึง pain_status, training_days_per_week, rest_days, strength_day,
 quality_nutrition/race_day_nutrition/long_run_nutrition — เขียนคำตอบจริงหรือ "none"/"not used" ทับให้หมด)
@@ -417,7 +417,7 @@ Tool ด้านล่างมีศัพท์เทคนิคเยอะ
 ```
 
 **Protected files** (convention for AI coding assistants during a live coaching session — see [CLAUDE.md](CLAUDE.md) — human contributors should open a PR as normal):
-- `GarminRawData/tools/*.py` (all 31 tools)
+- `GarminRawData/tools/*.py` (all 33 tools)
 - `skills/garmin_coach_mcp/config.py` + `db_helper.py`
 
 CI runs automatically on every push via GitHub Actions.

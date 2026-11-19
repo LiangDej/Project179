@@ -3,7 +3,7 @@
 taper_monitor.py — Race Week Taper Status Monitor
 
 ตรวจสอบว่าช่วง Taper ทำถูกต้องไหม:
-  - Volume ลดตามเกณฑ์ JD (30% @ 7-14 วัน, 50% @ ≤7 วัน)
+  - Volume ลดตาม taper profile ของ tier สนาม (readiness.TAPER_PROFILES — Bosquet 2007)
   - Body Battery กำลัง charge ขึ้นตามแผน
   - ไม่มี workout หนักเกินที่กำหนด
   - คาดการณ์ BB วันแข่ง
@@ -28,12 +28,12 @@ from pathlib import Path
 BASE_DIR  = Path(__file__).parent.parent
 TOOLS_DIR = Path(__file__).parent
 COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
-DATA_FILE = BASE_DIR / "running_activities_all.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
 
-from config import ATHLETE, TRAINING_PHASES, BASELINES  # noqa: E402
+from config import ATHLETE, DAY_NUTRITION  # noqa: E402
+from readiness import TAPER_PROFILES, taper_profile  # noqa: E402
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,26 +45,14 @@ logger = logging.getLogger(__name__)
 try:
     from race_registry import load_races
     RACE_REGISTRY = {
-        k: {"name": f"{r['name']} ({r['dist_km']:.0f}km)", "date": date.fromisoformat(r["date"])}
+        k: {"name": f"{r['name']} ({r['dist_km']:.0f}km)", "date": date.fromisoformat(r["date"]),
+            "tier": r.get("tier", "A"), "taper_days": r.get("taper_days")}
         for k, r in load_races().items() if r.get("active", True)
     }
 except Exception:
     print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
     print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
     sys.exit(1)
-
-# Taper volume targets (% of peak week to RETAIN — not cut).
-# "far" (>15 days out) is NOT actual taper — it's most of the training cycle
-# (Base/Quality/Race-Specific build), where training_planner.py deliberately
-# builds volume UP toward peak_km. Capping it at 80% of peak here contradicted
-# that and mislabeled normal build weeks as "Pre-Taper", so it carries
-# is_taper=False and analyze_taper() skips the volume ceiling/warning for it.
-TAPER_VOLUME = {
-    "far":    {"days_min": 15, "days_max": 999, "retain_pct": 0.80, "label": "Build Phase (not tapering yet)", "is_taper": False},
-    "early":  {"days_min": 8,  "days_max": 14,  "retain_pct": 0.70, "label": "Early Taper (-30%)", "is_taper": True},
-    "late":   {"days_min": 4,  "days_max": 7,   "retain_pct": 0.50, "label": "Race Week (-50%)", "is_taper": True},
-    "final":  {"days_min": 0,  "days_max": 3,   "retain_pct": 0.30, "label": "Final Days (-70%)", "is_taper": True},
-}
 
 # BB targets for taper
 BB_TARGETS = {
@@ -76,78 +64,46 @@ BB_TARGETS = {
 # ---------------------------------------------------------------------------
 # Data helpers
 # ---------------------------------------------------------------------------
-def _get_nearest_race(race_key: str | None) -> tuple[str, date] | tuple[None, None]:
-    """คืน (race_name, race_date) ของ race ที่ใกล้ที่สุดในอนาคต"""
+def _get_nearest_race(race_key: str | None) -> tuple:
+    """(race_name, race_date, taper profile) of the chosen / nearest upcoming race."""
     today = date.today()
-    if race_key:
-        r = RACE_REGISTRY.get(race_key.lower())
-        if r:
-            return r["name"], r["date"]
-    # Auto-select nearest upcoming
-    upcoming = [(v["name"], v["date"]) for v in RACE_REGISTRY.values()
-                if v["date"] >= today]
+    if race_key and RACE_REGISTRY.get(race_key.lower()):
+        r = RACE_REGISTRY[race_key.lower()]
+        return r["name"], r["date"], taper_profile(r)
+    upcoming = [v for v in RACE_REGISTRY.values() if v["date"] >= today]
     if not upcoming:
-        return None, None
-    return min(upcoming, key=lambda x: x[1])
+        return None, None, None
+    r = min(upcoming, key=lambda v: v["date"])
+    return r["name"], r["date"], taper_profile(r)
+
+
+def _weekly_km(weeks: int) -> dict:
+    from activity_loader import load_activities_merged
+    today = date.today()
+    cutoff = today - timedelta(weeks=weeks)
+    weekly: dict[date, float] = {}
+    for a in load_activities_merged():
+        try:
+            dt = datetime.strptime((a.get("startTimeLocal") or "")[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if cutoff <= dt <= today:
+            mon = dt - timedelta(days=dt.weekday())
+            weekly[mon] = weekly.get(mon, 0) + (a.get("distance") or 0) / 1000
+    return weekly
 
 
 def _get_week_mileage() -> float:
-    """คำนวณ mileage สัปดาห์นี้ (จันทร์–วันนี้) จาก local JSON cache"""
-    if not DATA_FILE.exists():
-        return 0.0
-    try:
-        with open(DATA_FILE, encoding="utf-8") as f:
-            activities = json.load(f)
-    except Exception:
-        return 0.0
-
+    """km this week (Mon–today) — shared activity loader (file + live)."""
     today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    total = 0.0
-    for a in activities:
-        dt_str = a.get("startTimeLocal", "")[:10]
-        try:
-            dt = datetime.strptime(dt_str, "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if monday <= dt <= today:
-            total += (a.get("distance") or 0) / 1000
-    return round(total, 1)
+    return round(_weekly_km(1).get(today - timedelta(days=today.weekday()), 0.0), 1)
 
 
-def _get_peak_week_km() -> float:
-    """
-    คำนวณ peak week km จาก local JSON (สัปดาห์ที่มี volume สูงสุด ใน 8 สัปดาห์ล่าสุด)
-    Fallback: 55.5 km (W18 Peak Week ที่บันทึกไว้)
-    """
-    FALLBACK = 55.5
-    if not DATA_FILE.exists():
-        return FALLBACK
-    try:
-        with open(DATA_FILE, encoding="utf-8") as f:
-            activities = json.load(f)
-    except Exception:
-        return FALLBACK
-
-    today = date.today()
-    cutoff = today - timedelta(weeks=8)
-    weekly: dict[date, float] = {}
-
-    for a in activities:
-        dt_str = a.get("startTimeLocal", "")[:10]
-        try:
-            dt = datetime.strptime(dt_str, "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if dt < cutoff:
-            continue
-        monday = dt - timedelta(days=dt.weekday())
-        weekly[monday] = weekly.get(monday, 0) + (a.get("distance") or 0) / 1000
-
-    if not weekly:
-        return FALLBACK
-    peak = max(weekly.values())
-    return round(peak, 1) if peak > 0 else FALLBACK
+def _get_peak_week_km() -> float | None:
+    """Peak week km in the last 8 weeks; None if no data (no invented fallback)."""
+    weekly = _weekly_km(8)
+    peak = max(weekly.values()) if weekly else 0
+    return round(peak, 1) if peak > 0 else None
 
 
 def _get_bb_from_cache() -> int | None:
@@ -163,22 +119,27 @@ def _get_bb_from_cache() -> int | None:
     return None
 
 
-def _get_taper_window(days_to_race: int) -> dict:
-    for key, tw in TAPER_VOLUME.items():
-        if tw["days_min"] <= days_to_race <= tw["days_max"]:
-            return {**tw, "key": key}
-    return {"key": "far", "retain_pct": 0.80, "label": "Build Phase (not tapering yet)",
-            "days_min": 15, "days_max": 999, "is_taper": False}
+def _get_taper_window(days_to_race: int, prof: dict) -> dict:
+    """Volume window from the race's taper profile (same rules as the planner)."""
+    if days_to_race > prof["window"]:
+        return {"key": "far", "retain_pct": 1.0, "label": "Build Phase (not tapering yet)", "is_taper": False}
+    if days_to_race <= prof["race_week"]:
+        cut = float(prof["vol_race"].rstrip("%")) / 100
+        return {"key": "race_week", "retain_pct": 1 - cut, "label": f"Race Week (-{prof['vol_race']})", "is_taper": True}
+    cut = float(prof["vol_early"].rstrip("%")) / 100
+    return {"key": "early", "retain_pct": 1 - cut, "label": f"Early Taper (-{prof['vol_early']})", "is_taper": True}
 
 
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
 def analyze_taper(days_to_race: int, bb: int | None, mileage_this_week: float,
-                  peak_km: float, race_name: str, race_date: date) -> dict:
+                  peak_km: float | None, race_name: str, race_date: date,
+                  prof: dict | None = None) -> dict:
     """คำนวณ taper compliance + BB projection + warnings"""
-
-    window = _get_taper_window(days_to_race)
+    prof = prof or TAPER_PROFILES["A"]
+    window = _get_taper_window(days_to_race, prof)
+    peak_km = peak_km or 0
     target_km  = round(peak_km * window["retain_pct"], 1)
     volume_ok  = mileage_this_week <= target_km * 1.10  # ±10% tolerance
     volume_pct = round(mileage_this_week / peak_km * 100, 1) if peak_km > 0 else 0
@@ -192,6 +153,8 @@ def analyze_taper(days_to_race: int, bb: int | None, mileage_this_week: float,
     # applies — just report where volume stands, without judging it.
     if days_to_race <= 0:
         warnings.append("🏁 วันแข่งถึงแล้ว! Good luck!")
+    elif not peak_km:
+        positives.append("ℹ️  ไม่มีข้อมูล peak week — ข้าม volume check")
     elif not window.get("is_taper", True):
         positives.append(f"ℹ️  Volume {mileage_this_week} km ({volume_pct}% ของ peak {peak_km} km) — ยังอยู่ช่วง build ไม่ใช่ taper")
     elif not volume_ok:
@@ -235,13 +198,16 @@ def analyze_taper(days_to_race: int, bb: int | None, mileage_this_week: float,
         warnings.append("⚠️  ไม่พบข้อมูล Body Battery — รัน daily_brief.py หรือดูจากนาฬิกาโดยตรง")
 
     # --- Taper-specific rules ---
-    if days_to_race <= 7:
-        warnings.append("🚫 ห้าม Quality Session ทุกชนิด — Easy Run + REST เท่านั้น")
-        warnings.append("🚫 ห้ามเพิ่ม volume แม้รู้สึกว่าขายังสดเกินไป (taper madness!)")
+    # Research taper (Bosquet 2007): keep intensity, cut volume. Quality is
+    # dropped only inside the profile's no_quality window.
+    if 0 < days_to_race <= prof["no_quality"]:
+        positives.append("ℹ️  ช่วงท้าย taper — Easy + strides สั้นๆ เท่านั้น ไม่มี Quality")
+    elif window.get("is_taper"):
+        positives.append("ℹ️  Taper: คง Quality สั้นๆ (ความหนักเท่าเดิม) แต่ลดปริมาณ — ไม่เพิ่ม volume")
 
     if days_to_race == 1:
         positives.append("💡 พรุ่งนี้แข่ง: Shakeout 3km เบาๆ + Drills — ไม่ต้องวอร์มนาน")
-        positives.append("💡 กินคาร์บวันนี้ให้เพียงพอ: ข้าว + Palatinose ก่อนนอน")
+        positives.append(f"💡 กินคาร์บวันนี้ให้เพียงพอ: {DAY_NUTRITION['carb_load']}")
 
     if days_to_race == 2:
         positives.append("💡 พรุ่งนี้: Easy 4km + 4×Strides — ตื่นขา ไม่สร้าง fatigue")
@@ -321,7 +287,7 @@ def main():
     parser.add_argument("--json",     action="store_true", help="Output raw JSON")
     args = parser.parse_args()
 
-    race_name, race_date = _get_nearest_race(args.race)
+    race_name, race_date, prof = _get_nearest_race(args.race)
     if race_date is None:
         print("❌ ไม่พบ upcoming race ใน RACE_REGISTRY")
         sys.exit(1)
@@ -332,7 +298,7 @@ def main():
     mileage        = args.mileage if args.mileage is not None else _get_week_mileage()
     peak_km        = args.peak_km if args.peak_km is not None else _get_peak_week_km()
 
-    result = analyze_taper(days_to_race, bb, mileage, peak_km, race_name, race_date)
+    result = analyze_taper(days_to_race, bb, mileage, peak_km, race_name, race_date, prof)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

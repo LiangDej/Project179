@@ -75,22 +75,10 @@ DOWNHILL_FACTOR = 6.0   # -6 sec/km per -1% downhill
 
 
 def _heat_penalty_pct(temp_c: float) -> float:
-    """
-    Estimate race time slowdown % due to ambient heat.
-    Source: Ely et al. (2007) ACSM — marathon data; applied conservatively to HM.
-    Reference temps: 10°C=0%, 15°C=1%, 20°C=2%, 25°C=4%, 30°C=7%, 35°C=10%
-    """
-    ref = [(10, 0.0), (15, 1.0), (20, 2.0), (25, 4.0), (30, 7.0), (35, 10.0)]
-    if temp_c <= ref[0][0]:
-        return 0.0
-    if temp_c >= ref[-1][0]:
-        return ref[-1][1]
-    for i in range(len(ref) - 1):
-        t0, p0 = ref[i]
-        t1, p1 = ref[i + 1]
-        if t0 <= temp_c <= t1:
-            return round(p0 + (temp_c - t0) / (t1 - t0) * (p1 - p0), 1)
-    return 0.0
+    """Race slowdown % from ambient heat — the shared Ely model (bangkok_climate);
+    this file used to carry its own interpolation table (+4.6 % at 26 °C vs +5.2 %)."""
+    from bangkok_climate import ely_penalty_fraction
+    return round(ely_penalty_fraction(temp_c) * 100, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +250,7 @@ def plan_race(race_key: str, goal_min: float | None, vdot_override: float | None
     heat_pct  = _heat_penalty_pct(temp_c) if temp_c is not None else 0.0
     heat_adj_min = round(goal_min * (1 + heat_pct / 100), 1) if heat_pct > 0 else None
 
+    hr = race_hr_plan(race['distance_km'])
     return {
         "race_name":        race["name"],
         "race_date":        race["date"].isoformat(),
@@ -279,14 +268,25 @@ def plan_race(race_key: str, goal_min: float | None, vdot_override: float | None
         "race_strategy": {
             "start":  f"km 0–{race['distance_km']*0.25:.0f}: Conservative +8 sec/km buffer",
             "build":  f"km {race['distance_km']*0.25:.0f}–{race['distance_km']*0.75:.0f}: Settle into race pace",
-            "finish": f"km {race['distance_km']*0.75:.0f}–{race['distance_km']:.1f}: Negative split — push if HR < 175",
+            "finish": f"km {race['distance_km']*0.75:.0f}–{race['distance_km']:.1f}: Negative split — push if HR < {hr['push_below']}",
         },
         "hr_strategy": {
-            "rule":   "จ้อง HR ไม่ใช่ pace — ถ้า HR แตะ 178 ก่อน km 15 ให้ถอย pace 5–8 sec/km",
-            "target": f"Avg HR: {round(ATHLETE['rhr'] + (ATHLETE['mhr']-ATHLETE['rhr'])*0.85)}–"
-                      f"{round(ATHLETE['rhr'] + (ATHLETE['mhr']-ATHLETE['rhr'])*0.90)} bpm",
+            "rule":   f"จ้อง HR ไม่ใช่ pace — ถ้า HR แตะ {hr['early_cap']} ก่อน km {race['distance_km']*0.75:.0f} ให้ถอย pace 5–8 sec/km",
+            "target": f"Avg HR: {hr['lo']}–{hr['hi']} bpm ({hr['zone']})",
         },
     }
+
+
+def race_hr_plan(distance_km: float) -> dict:
+    """Race HR guide from the athlete's zones (config) — HM ≈ low/mid T zone,
+    FM ≈ upper M zone (JD: HM ≈ T-ish effort, FM = M). No literal bpm."""
+    t_lo, t_hi = HR_ZONE_BOUNDS["Z3_T"]
+    m_lo, m_hi = HR_ZONE_BOUNDS["Z2_M"]
+    if distance_km >= 30:
+        mid = (m_lo + m_hi) // 2
+        return {"lo": mid, "hi": m_hi, "early_cap": m_hi, "push_below": mid, "zone": "upper M zone"}
+    t_mid = (t_lo + t_hi) // 2
+    return {"lo": t_lo, "hi": t_mid, "early_cap": t_mid, "push_below": t_lo, "zone": "low–mid T zone"}
 
 
 def print_plan(p: dict):

@@ -29,7 +29,12 @@ except ImportError:
     get_garmin_client = None
     logger.warning("Could not import get_garmin_client from garmin_client.py — BB data unavailable")
 
-from config import ATHLETE, ZONE_PCT, HR_ZONE_BOUNDS  # noqa: E402
+from config import ATHLETE, ZONE_PCT, HR_ZONE_BOUNDS, VDOT_PACES  # noqa: E402
+from jd_rules import check_long_run  # noqa: E402
+
+# JD mileage progression (Daniels): raise weekly volume by at most ~1 mile
+# (1.6 km) per running session per week, and only after 3–4 weeks at a level.
+JD_STEP_KM_PER_SESSION = 1.6
 from training_load import calc_hr_tss  # noqa: E402  — single source of truth for TSS
 
 HEALTH_CACHE = BASE_DIR / "wellness"
@@ -105,6 +110,7 @@ def analyze_week(acts, start, end, quality_map: dict | None = None):
     lr_avg_hr = long_run.get("averageHR", 0) if long_run else 0
     lr_max_hr = long_run.get("maxHR", 0) if long_run else 0
     lr_dist = long_run.get("distance", 0)/1000 if long_run else 0
+    lr_min = (long_run.get("duration") or 0) / 60 if long_run else 0
 
     n = len(week_acts)
     return {
@@ -117,7 +123,8 @@ def analyze_week(acts, start, end, quality_map: dict | None = None):
         "q_sessions": q_sessions,
         "lr_dist": round(lr_dist, 1),
         "lr_avg_hr": int(lr_avg_hr),
-        "lr_max_hr": int(lr_max_hr)
+        "lr_max_hr": int(lr_max_hr),
+        "lr_min": round(lr_min, 1),
     }
 
 def fetch_weekly_bb(client, start_date, end_date):
@@ -237,16 +244,24 @@ def main():
             print(f"📈 Volume vs Last Week (prorated to {days_elapsed}/7 days elapsed): "
                   f"{arrow}{abs(delta):.1f} km ({pct:+.1f}%)")
 
-        # 10% rule check — only meaningful once the current week is
-        # actually over; a partial week can't be judged as "taper compliant"
+        # JD progression check (replaces the "10 % rule", which JD does not
+        # use) — only once the week is over; a partial week can't be judged.
+        jd_step = JD_STEP_KM_PER_SESSION * max(1, cur['n_sessions'])
         if not week_complete:
             print(f"ℹ️  สัปดาห์นี้ยังไม่จบ ({days_elapsed}/7 วัน) — ตัวเลข compliance/taper verdict รอครบสัปดาห์ก่อน")
-        elif pct > 10:
-            print(f"⚠️  Volume เพิ่มขึ้น > 10% — เสี่ยง Overtraining! ลดลง")
+        elif delta > jd_step:
+            print(f"⚠️  Volume เพิ่ม {delta:.1f} km > เพดาน JD {jd_step:.1f} km "
+                  f"(≈1 mile × {cur['n_sessions']} sessions) — คงระดับนี้ 3–4 สัปดาห์ก่อนเพิ่ม")
         elif pct < -30:
             print(f"✅ Taper Volume ลดลงดีมาก ({pct:.1f}%)")
         else:
-            print(f"✅ Volume เพิ่มขึ้นอยู่ในเกณฑ์ปลอดภัย")
+            print(f"✅ Volume เพิ่มขึ้นอยู่ในเกณฑ์ JD (≤ {jd_step:.1f} km)")
+
+        # JD long-run limit (≤25–30 % of the week, ≤150 min)
+        if week_complete and cur['lr_dist']:
+            _w = check_long_run(cur['lr_dist'], cur['lr_min'], cur['total_km'], VDOT_PACES["E"])
+            if _w:
+                print(f"⚠️  {_w}")
 
         # Quality check
         if cur['q_sessions'] > 2:
@@ -256,7 +271,7 @@ def main():
             
         # Long Run HR Check — Z1 Easy ceiling from config (single source)
         if cur['lr_avg_hr'] > HR_ZONE_BOUNDS["Z1_E"][1]:
-            print(f"⚠️  Long Run HR สูงเกินไป (Avg {cur['lr_avg_hr']} bpm) — ควรลด Pace ให้อยู่ใน Zone 1-2")
+            print(f"⚠️  Long Run HR สูงเกิน E (Avg {cur['lr_avg_hr']} > {HR_ZONE_BOUNDS['Z1_E'][1]} bpm) — ลด pace ให้อยู่ใน E")
         elif cur['lr_avg_hr'] > 0:
             print(f"✅ Long Run HR อยู่ในเกณฑ์ที่ปลอดภัย")
 

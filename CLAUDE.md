@@ -18,8 +18,8 @@ skills/garmin_coach_mcp/config.py
 skills/garmin_coach_mcp/db_helper.py
 ```
 
-**Rule of thumb: EVERY `*.py` in `GarminRawData/tools/` is protected — current (31) + any added later.**
-Full enumeration (31):
+**Rule of thumb: EVERY `*.py` in `GarminRawData/tools/` is protected — current (33) + any added later.**
+Full enumeration (33):
 
 ```
 GarminRawData/tools/daily_brief.py
@@ -53,6 +53,8 @@ GarminRawData/tools/form_tracker.py            # cadence/VR trend + HR correlati
 GarminRawData/tools/race_registry.py           # single-source race loader (reads races.json)
 GarminRawData/tools/bangkok_climate.py         # month-aware morning temp (Ely heat-adj)
 GarminRawData/tools/form_analysis.py           # per-km form + wrist-HR cadence-lock (post-run)
+GarminRawData/tools/jd_rules.py                # JD limits (E 79%HRmax, T/I/R/M/long caps) + workout rendering
+GarminRawData/tools/readiness.py               # ONE readiness + taper + post-race-recovery engine
 skills/garmin_coach_mcp/config.py
 skills/garmin_coach_mcp/db_helper.py
 ```
@@ -61,15 +63,18 @@ skills/garmin_coach_mcp/db_helper.py
 
 | ค่าที่เปลี่ยนได้ | แก้ที่ (data, NOT protected) | tools อ่านผ่าน |
 |---|---|---|
-| **VDOT, LTHR, RHR, MHR, weight, paces, HR-zone %, nutrition products** | `GarminRawData/athlete.json` | `config.py` (derive zones/paces) |
-| **Race targets (date/dist/goal/stations/course)** | `GarminRawData/races.json` | `race_registry.py` |
+| **VDOT, LTHR, RHR, MHR, weight, HR-zone %, nutrition products + protocol, form baselines, LT2 treadmill anchors, sweat Na, strength routine** | `GarminRawData/athlete.json` | `config.py` (derives zones; **paces derived from VDOT** via `vdot_math.jd_paces`) |
+| **Race targets (date/dist/goal tiers/stations/course lat-lon/expected weather)** | `GarminRawData/races.json` | `race_registry.py` |
+| **Season plan: phases (dates, weekly_km) + workout SPECS per phase** | `GarminRawData/training_plan.json` | `config.py` → `training_planner.week_plan` (JD-capped by `jd_rules`) |
+
+No literal HR/pace/race/product/date values in tool code — `test_suite.py` has an AST scan that fails if one comes back.
 
 หลัง TT/แข่งใหม่ → แก้ `athlete.json` ที่เดียว (หรือรัน `post_race_updater.py`) → ทุก tool ตามทันที ไม่ต้อง review โค้ด.
 `python3 race_registry.py --set-active <key>` สลับ A-race.
 
 **If asked to run, test, or analyze output from any of these tools → run them via bash, do NOT edit the source.**
 
-**If you believe one of the protected files above (the 31 tools, `config.py`, or `db_helper.py`) needs updating → STOP and tell the user what change you'd like to make, then wait for explicit approval.**
+**If you believe one of the protected files above (the 33 tools, `config.py`, or `db_helper.py`) needs updating → STOP and tell the user what change you'd like to make, then wait for explicit approval.**
 
 **⚠️ This approval requirement applies ONLY to the protected files listed above. It does NOT apply to `athlete.json`, `races.json`, or any other data file — those are meant to be edited freely, with no confirmation needed.** This matters most during first-time setup: when a user runs the onboarding flow (copying `athlete.example.json`/`races.example.json` to `athlete.json`/`races.json` and filling in their values), just write the files directly — do not ask for permission first, and do not treat this as "modifying a protected file." That's the entire point of the single-source-of-truth design: `athlete.json`/`races.json` are plain data, not code, and editing them is the *normal, expected, everyday* way this project is configured.
 
@@ -83,13 +88,13 @@ PROJECT 179 — Garmin-connected Jack Daniels running coach agent.
 - **A-race**: configured in `GarminRawData/races.json` (see `races.example.json` for template)
 - **Stack**: Python tools + FastMCP server + Garmin Connect API
 - **Skill file**: `skills/garmin-coach-analyzer.md`
-- **Config**: `config.py` derives paces/HR-zones from `athlete.json` (the editable single source). Edit athlete.json, not config.py.
+- **Config**: `config.py` derives paces/HR-zones from `athlete.json` and loads the season plan from `training_plan.json`. Edit the data files, not config.py.
 
 ## ✅ Test Suite — รันหลังแก้ tool/config/data ทุกครั้ง
 
 ```bash
-.venv/bin/python3.13 GarminRawData/tests/test_suite.py   # 172 checks, exit 0 = ผ่าน
-(cd GarminRawData/tools && ../../.venv/bin/python3.13 -m unittest tests.test_tools)   # 72 unit tests
+.venv/bin/python3.13 GarminRawData/tests/test_suite.py   # 208 checks, exit 0 = ผ่าน
+(cd GarminRawData/tools && ../../.venv/bin/python3.13 -m unittest tests.test_tools)   # 69 unit tests
 ```
 4 ชั้น: **PLAUSIBILITY** (output ต้องสมเหตุสมผลทางสรีรวิทยา ไม่ใช่แค่สูตรตรงกัน) + **UNIT** (สูตรแต่ละ tool) + **CONSISTENCY** (single-source invariants — รวม STATIC source-scan ที่จับ stale literal ทุก branch เช่น HR<155/170–176/VDOT38) + **FUNCTIONAL** (รัน flow จริง เทียบ output กับ config). จับ regression class: race-pace≠vdot_math, nutrition>80%, _classify_speed, ACWR, Fuji leak, Easy-ceiling≠config. แก้ค่าใน athlete.json/races.json แล้วรัน suite ต้องเขียวก่อนถือว่าเสร็จ.
 
@@ -138,8 +143,10 @@ cd GarminRawData/tools
 
 ## Data Files
 
-- `GarminRawData/athlete.json` — ⭐ SINGLE SOURCE: VDOT/LTHR/RHR/MHR/weight/paces/HR-zone%/nutrition (config.py reads this)
+- `GarminRawData/athlete.json` — ⭐ SINGLE SOURCE: VDOT/LTHR/RHR/MHR/weight/HR-zone%/nutrition/form baselines (config.py reads this; paces are derived from VDOT)
 - `GarminRawData/races.json` — ⭐ SINGLE SOURCE: race targets (race_registry.py reads this)
+- `GarminRawData/training_plan.json` — ⭐ SINGLE SOURCE: season phases + workout specs (gitignored; template `training_plan.example.json`)
+- `GarminRawData/cross_training_all.json` — cardio cross-training cache (elliptical/bike/swim) for PMC/ACWR (gitignored)
 - `GarminRawData/running_activities_all.json` — synced activity history (all runs)
 - `GarminRawData/QualitySessionLog/sessions.json` — **retired v1.7.1** (merged into sessions_master; tools read `session_logger.load_quality_log()`)
 - `GarminRawData/QualitySessionLog/sessions_master.json` — ⭐ SINGLE session log: lap-level record + `analysis` block (grade/pace/form) per session; read via `session_logger.load_quality_log()`

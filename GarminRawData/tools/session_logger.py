@@ -37,7 +37,6 @@ from config import ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS  # noqa: E402
 from garmin_client import get_client, get_health_cached, get_laps_cached  # noqa: E402
 
 MASTER_PATH     = BASE_DIR / "QualitySessionLog" / "sessions_master.json"
-ACTIVITIES_PATH = BASE_DIR / "running_activities_all.json"
 
 SESSION_TYPES = {
     "1": ("easy",        "Easy Run — aerobic base, HR < Z2"),
@@ -49,7 +48,8 @@ SESSION_TYPES = {
 
 LAP_ROLES = {"w": "warmup", "q": "quality", "r": "recovery", "c": "cooldown"}
 
-EASY_HR_THRESHOLD = HR_ZONE_BOUNDS["Z1_E"][1]   # Z1 Easy ceiling (155) from config — avg HR ≤ this → easy
+EASY_HR_THRESHOLD = HR_ZONE_BOUNDS["Z1_E"][1]   # JD E ceiling (79 % HRmax) from config — avg HR ≤ this → easy
+BATCH_DEFAULT_DAYS = 90
 MIN_DIST_KM       = 3.0   # skip activities shorter than this
 
 
@@ -73,10 +73,8 @@ def _save_master(data: dict):
 
 
 def _load_activities() -> list:
-    if not ACTIVITIES_PATH.exists():
-        return []
-    with open(ACTIVITIES_PATH) as f:
-        return json.load(f)
+    from activity_loader import load_activities_merged
+    return load_activities_merged()
 
 
 def _is_logged(activity_id: int, master: dict) -> bool:
@@ -686,7 +684,7 @@ def batch_import_easy(since_date: str | None = None):
     """Import all easy sessions non-interactively."""
     master     = _load_master()
     activities = _load_activities()
-    cutoff     = date.fromisoformat(since_date) if since_date else date(2026, 3, 26)
+    cutoff     = date.fromisoformat(since_date) if since_date else date.today() - timedelta(days=BATCH_DEFAULT_DAYS)
 
     easy_acts = []
     for a in activities:
@@ -857,7 +855,7 @@ def main():
     grp.add_argument("--list",        action="store_true", help="Show all logged sessions")
     grp.add_argument("--summary",     action="store_true", help="Trend summary by type")
     grp.add_argument("--weeks",       action="store_true", help="Weekly km aggregation table")
-    parser.add_argument("--since",    default="2026-03-26", help="Start date for --batch-easy (YYYY-MM-DD)")
+    parser.add_argument("--since",    default=None, help=f"Start date for --batch-easy (YYYY-MM-DD; default last {BATCH_DEFAULT_DAYS} days)")
     parser.add_argument("--n",        type=int, default=12, help="Number of weeks to show with --weeks")
     args = parser.parse_args()
 

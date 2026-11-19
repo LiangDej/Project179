@@ -25,21 +25,24 @@ for your actual location instead of this fallback.
 """
 from datetime import date
 
-# Month (1–12) → typical early-morning dry-bulb °C in Bangkok
-BANGKOK_MORNING_TEMP_C = {
-    1: 25.0,   # ม.ค. cool season
-    2: 26.0,   # ก.พ.
-    3: 28.0,   # มี.ค. heating up
-    4: 29.5,   # เม.ย. hottest
-    5: 29.0,   # พ.ค.
-    6: 28.0,   # มิ.ย. rainy
-    7: 27.5,   # ก.ค.
-    8: 27.5,   # ส.ค.
-    9: 27.0,   # ก.ย.
-    10: 27.0,  # ต.ค.
-    11: 26.0,  # พ.ย. cool returns (ATM race month)
-    12: 24.5,  # ธ.ค. coolest mornings
+# Month → (early-morning dry-bulb °C, RH %, dew point °C, wind m/s) in Bangkok.
+# The ONE climate table (v1.8: weather_adjuster had a second, slightly
+# different copy). TMD 1991–2020 normals at the athlete's run time.
+BANGKOK_CLIMATE = {
+    1:  (25.0, 70, 18.5, 1.8),
+    2:  (26.0, 68, 19.5, 1.9),
+    3:  (28.0, 72, 21.5, 2.0),
+    4:  (29.5, 75, 23.0, 2.1),
+    5:  (29.0, 79, 24.0, 2.2),
+    6:  (28.0, 82, 24.5, 2.3),
+    7:  (27.5, 83, 24.5, 2.2),
+    8:  (27.5, 84, 24.5, 2.2),
+    9:  (27.0, 84, 24.0, 1.8),
+    10: (27.0, 80, 23.0, 1.7),
+    11: (26.0, 75, 21.0, 1.6),
+    12: (24.5, 68, 18.0, 1.7),
 }
+BANGKOK_MORNING_TEMP_C = {m: v[0] for m, v in BANGKOK_CLIMATE.items()}
 
 # Daniels/Ely reference temperature — no heat penalty at/below this
 ELY_NEUTRAL_C = 13.0
@@ -57,7 +60,8 @@ def morning_temp_c_for(d: date) -> float:
 
 
 def ely_penalty_fraction(temp_c: float) -> float:
-    """Ely heat penalty as a fraction (e.g. 0.064 = +6.4% pace cost)."""
+    """Ely heat penalty as a fraction (e.g. 0.064 = +6.4% pace cost).
+    THE heat model — race_pace_planner and weather_adjuster build on this."""
     return max(0.0, (temp_c - ELY_NEUTRAL_C) * ELY_PCT_PER_C)
 
 

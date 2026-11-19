@@ -37,18 +37,12 @@ LONG_RUN_TYPES   = {"Easy Run", "Marathon Pace", "long", "long_run", "easy", "Ea
 QUALITY_TYPES    = {"Threshold (T)", "Interval (I)", "Tempo", "Fast Finish",
                     "threshold", "interval", "tempo"}
 
-ACTIVITIES_JSON  = BASE_DIR / "running_activities_all.json"
 
 
 def _load_activities_index() -> dict[int, dict]:
     """Load running_activities_all.json indexed by activityId for pace fallback."""
-    if not ACTIVITIES_JSON.exists():
-        return {}
-    try:
-        acts = json.loads(ACTIVITIES_JSON.read_text())
-        return {int(a["activityId"]): a for a in acts if a.get("activityId")}
-    except Exception:
-        return {}
+    from activity_loader import load_activities_merged
+    return {int(a["activityId"]): a for a in load_activities_merged() if a.get("activityId")}
 
 
 def _pace_from_speed(speed_ms: float | None) -> str | None:
