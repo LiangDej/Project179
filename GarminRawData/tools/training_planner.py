@@ -193,12 +193,8 @@ def _load_schedule_config() -> tuple[int, set, str | None]:
     training_days_per_week counts RUNNING days only — strength_day is separate
     (a training day, but not a rest day and not a running day).
     """
-    import json as _json
-    athlete_path = os.path.join(os.path.dirname(__file__), "..", "athlete.json")
-    try:
-        aj = _json.loads(open(athlete_path, encoding="utf-8").read())
-    except Exception:
-        aj = {}
+    # config already loaded athlete.json (or athlete.example.json on a fresh clone)
+    from config import _AJ as aj
     rest_days = {d.lower() for d in aj.get("rest_days", ["friday"])}
     strength_day = aj.get("strength_day")
     strength_day = strength_day.lower() if strength_day else None
@@ -225,7 +221,7 @@ def weekly_structure(q_max: int) -> dict:
     schedule[long_day] = "long"
     remaining = [d for d in active if d != long_day]
     quality_days = []
-    if remaining:
+    if remaining and q_max >= 1:   # recovery phase: quality_max 0 → no quality day
         quality_days.append(remaining[0])
     if q_max >= 2 and len(remaining) >= 3:
         quality_days.append(remaining[len(remaining) // 2])
@@ -300,7 +296,7 @@ def build_plan(race_key: str, target_date: date, num_weeks: int):
 
         wp = week_plan(week_start, race_key, race_date)
         phase_name, presc, km = wp["phase"], wp["prescription"], wp["km_target"]
-        if phase_name != "taper":
+        if phase_name not in ("taper", "recovery"):
             peak_km = max(peak_km, km)
         q_max = presc.get("quality_max", 1)
         q1 = presc.get("quality1") or {"type": "-"}
@@ -317,12 +313,13 @@ def build_plan(race_key: str, target_date: date, num_weeks: int):
             sessions = f"🏁 {race['name']} — {race_date}"
         elif wp["is_deload"]:
             marker = "🔄 deload"
-        elif km == peak_km and phase_name not in ("taper",):
+        elif km == peak_km and phase_name not in ("taper", "recovery"):
             marker = "⭐ peak"
 
         phase_label = phase_name.replace("_", " ").title()
         print(f"{w+1:<4} {str(week_start):<12} {phase_label:<14} {km:>5}  {qual_str:>8}  "
               f"L{wp['long_km']:<3} {marker}{'  ✂️ JD' if wp['long_capped'] else ''}")
+        print(f"     {sessions}")
 
     print()
     print(f"⭐ Peak week: {peak_km} km")
@@ -339,7 +336,7 @@ def build_plan(race_key: str, target_date: date, num_weeks: int):
     # Phase legend
     print("📋 Phase Sessions:")
     for phase_key, presc in PHASE_PRESCRIPTIONS.items():
-        q1 = presc["quality1"]
+        q1 = presc.get("quality1") or {"workout": "— (easy only)"}
         q2 = presc.get("quality2")
         long_note = presc.get("long_note", "")
         print(f"   {phase_key.replace('_',' ').title():<16} Q1: {q1['workout'][:45]}")
@@ -397,7 +394,7 @@ def _phase_week_km(phase_info: dict, monday: date) -> tuple[int, bool]:
     total = max(1, round((phase_info["end"] - phase_info["start"]).days / 7))
     wk = max(0, (monday - phase_info["start"]).days // 7)
     raw = lo + (hi - lo) * min(1.0, wk / max(1, total - 1))
-    deload = (wk + 1) % 4 == 0 and phase_info["phase"] != "taper"
+    deload = (wk + 1) % 4 == 0 and phase_info["phase"] not in ("taper", "recovery")
     return int(round(raw * (DELOAD_FACTOR if deload else 1.0))), deload
 
 
@@ -457,8 +454,9 @@ def week_plan(monday: date = None, race_key: str | None = None,
     q_max     = presc.get("quality_max", 1)
     long_plan = progressive_long_km(phase_info, monday) if phase_info else presc.get("long_km", 16)
     long_km, long_capped = long_plan, None
-    if phase_name != "taper":
-        cap, why = long_run_cap(km_target, VDOT_PACES["E"])
+    long_rule = (phase_info or {}).get("long_rule", "general")
+    if phase_name not in ("taper", "recovery"):
+        cap, why = long_run_cap(km_target, VDOT_PACES["E"], long_rule)
         if cap and long_plan > cap:
             long_km = max(EASY_MIN_KM, int(cap))
             long_capped = f"Long {long_plan}→{long_km} km ({why})"
@@ -526,17 +524,11 @@ def build_chart(race_key: str, target_date: date, num_weeks: int):
         "quality": "▪",
         "race_specific": "█",
         "taper": "░",
+        "recovery": "-",
     }
 
     BAR_SCALE = 1.2   # chars per km
     MAX_KM    = 80    # max for scale
-
-    # Dynamic volume targets (mirrors build_plan logic exactly)
-    actual_recent_km   = _current_weekly_km()
-    historical_peak_km = _historical_peak_km()
-    base_start_km      = max(BASE_FLOOR_KM, int(actual_recent_km / 5) * 5)
-    target_peak_km     = _target_peak_km(actual_recent_km, historical_peak_km)
-    phase_km           = _build_phase_km(base_start_km, target_peak_km)
 
     print("=" * 72)
     print(f"📊 SEASON CHART — {race['name']} ({target_date})")
@@ -548,24 +540,12 @@ def build_chart(race_key: str, target_date: date, num_weeks: int):
     for w in range(num_weeks):
         week_start    = start + timedelta(weeks=w)
         week_end      = week_start + timedelta(days=6)
-        weeks_to_race = max(0, (target_date - week_start).days // 7)
-
-        phase_name = get_phase_for_week(weeks_to_race, num_weeks)
+        # v1.8.1: same week computation as build_plan / the brief (week_plan);
+        # the chart used to re-run the pre-v1.8 dynamic logic.
+        wp         = week_plan(week_start, race_key, target_date)
+        phase_name = wp["phase"]
         char       = PHASE_COLORS.get(phase_name, "·")
-
-        # Plan km (mirrors build_plan logic exactly — same helpers, no separate copy)
-        if phase_name == "taper":
-            km = _taper_km(weeks_to_race, target_peak_km)
-        else:
-            phase_cfg = phase_km[phase_name]
-            if phase_name == "base":
-                base_km = base_start_km + min(w, 10) * phase_cfg["step"]
-            else:
-                base_km = phase_cfg["min"] + min(w, 10) * phase_cfg["step"]
-            base_km = min(base_km, phase_cfg["max"])
-            if (w + 1) % 4 == 0:
-                base_km = int(base_km * DELOAD_FACTOR)
-            km = base_km
+        km         = wp["km_target"]
 
         is_current = (week_start <= today <= week_end)
         is_past    = week_end < today

@@ -50,7 +50,11 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent
 sys.path.append(str(BASE_DIR.parent / "skills" / "garmin_coach_mcp"))
-from config import ATHLETE, HR_ZONES  # noqa: E402
+from config import ATHLETE, HR_ZONES, VDOT_PACES, _build_zones, _AJ  # noqa: E402
+
+# Main-block detection floor: a bit under the athlete's own M pace (an LT2
+# test runs at T effort) — was a fixed 11.0 km/h that broke for slower runners.
+DEFAULT_MIN_KMH = round(3600 / VDOT_PACES["M"][1] * 0.95, 1)
 
 # Friel %LTHR zone breakpoints (running) — see header source #2
 FRIEL_ZONES = [
@@ -118,7 +122,7 @@ def _rolling_median(vals, w=5):
     return out
 
 
-def detect_main_block(rows, min_kmh=11.0, min_minutes=10.0, gap_tol_sec=30.0):
+def detect_main_block(rows, min_kmh=DEFAULT_MIN_KMH, min_minutes=10.0, gap_tol_sec=30.0):
     """Longest sustained block with smoothed speed >= min_kmh.
     Brief dips below threshold (<= gap_tol_sec — GPS dropouts, belt changes,
     one slow km) are bridged so the full effort is captured as one block.
@@ -265,14 +269,11 @@ def friel_zones(lthr, mhr):
 
 
 def daniels_zones(lthr, rhr, mhr):
-    """Daniels E/M/T/I/R HR bands anchored on measured LTHR.
-    T-zone TOP = LTHR (threshold by definition). Bands per Friel %LTHR mapping."""
-    return {
-        "E": (rhr, round(lthr * 0.89)),          # easy: up to top of Friel Z2
-        "M": (round(lthr * 0.90), round(lthr * 0.94)),   # marathon ≈ Friel Z3
-        "T": (round(lthr * 0.95), round(lthr * 1.00)),   # threshold ≈ Friel Z4→LTHR
-        "I": (round(lthr * 1.02), mhr),          # VO2max: above threshold
-    }
+    """Zones the tools WOULD use with this LTHR — the same config._build_zones
+    (E = JD 79 % HRmax, T top = LTHR, M/I from athlete.json %HRR). v1.8.1:
+    this used Friel %LTHR (E up to 0.89·LTHR = 163), not the v1.8 rules."""
+    b = _build_zones(rhr, mhr, lthr, _AJ.get("hr_zone_hrr_pct", {}))
+    return {"E": b["Z1_E"], "M": b["Z2_M"], "T": b["Z3_T"], "I": (b["Z4_I"][0], mhr)}
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +349,7 @@ def report(act_id, date_str, a, rpe):
     print(f"\n{'─'*60}")
     print("💡 ขั้นต่อไป (ไม่แก้ config อัตโนมัติ — รอ approve):")
     if conf == "HIGH":
-        print("   ค่า confidence สูง → พร้อมเสนอ patch config.py HR_ZONES")
+        print("   ค่า confidence สูง → พร้อมเสนอแก้ athlete.json → lthr (zones คำนวณตามเอง)")
         print(f"   T-zone ใหม่ที่เสนอ = {dz['T'][0]}–{dz['T'][1]} bpm (เดิม {cur_lo}–{cur_hi})")
     elif conf in ("MODERATE", "LOW"):
         print("   ค่า confidence ยังไม่สูง → แนะนำ re-test หรือใช้ค่านี้แบบ provisional")

@@ -47,7 +47,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent
 sys.path.append(str(BASE_DIR.parent / "skills" / "garmin_coach_mcp"))
-from config import ATHLETE, BASELINES, ZONE_PCT  # noqa: E402
+from config import ATHLETE, BASELINES, ZONE_PCT, HR_ZONE_BOUNDS  # noqa: E402
 
 RUN_TYPES = {"running", "treadmill_running", "trail_running"}
 
@@ -171,10 +171,8 @@ def trend(runs, key, lower_is_better, unit, target=None):
 # Form → HR correlation (confounder-controlled)
 # ---------------------------------------------------------------------------
 def form_hr_corr(runs, speed_lo, speed_hi):
-    # Easy HR ceiling (top of Z2 in %HRR terms) to keep only easy runs
-    rhr, mhr = ATHLETE["rhr"], ATHLETE["mhr"]
-    hrr = mhr - rhr
-    easy_ceiling = rhr + hrr * (ZONE_PCT["M"] / 100)  # below threshold
+    # Easy runs only — JD E ceiling from config (v1.8.1: used the M-zone top)
+    easy_ceiling = HR_ZONE_BOUNDS["Z1_E"][1]
 
     subset = [r for r in runs
               if r["is_tm"] and r.get("hr") and r.get("kmh")

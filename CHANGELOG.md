@@ -2,6 +2,47 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [1.8.1] — 2026-11-19
+
+Fixes from a full architectural review of v1.8 (all findings reproduced live
+before fixing) + the treadmill/outdoor venue label. Every finding has a
+regression check (`v181_tests`, 43 checks).
+
+### Fixed — P0 (would have broken the 2027 season)
+- **Archived Fuji Marathon (13 Dec) forced 15 days of easy-only from 14 Dec.** `post_race_recovery` counted archived/inactive races. Now only races actually raced count; `races.json → "recovery": false` marks a race run as training (dongtan10 pacer duty).
+- **Strength days ignored everything but BB** — day 1 after a marathon, a moderate knee, an HRV crash or RHR +8 still said "GO squat". Now → mobility.
+- **JD long-run cap had a cliff at 64 km/wk** (63 km → 18.9 km, 64 km → 16.0 km) and capped the 2027 marathon peak at 17 km. The %-of-week cap is now monotonic, and phases with `long_rule: "marathon"` (2027 Marathon Build / Race Specific) use JD's marathon-plan limit: ≤150 min, no %-of-week cap (≈23 km at VDOT 40) — athlete's choice 2026-11-19. The M-pace finish is now capped by the JD M rule (20 % / 29 km).
+- **`garmin_workout_pusher` uploaded "Quality T 3×10min" on a readiness REST day** (REST kept type quality1, no spec → legacy text parser). REST/RACE never build a workout; REST sessions carry no spec. Also: long runs now push the M-pace finish; `stepOrder`/`childStepId` collided after repeat groups; combo reps cut by JD caps were not pushed; `input()` hung non-interactive runs.
+- **`post_race_updater` still wrote `vdot_paces_sec`** (would fail the suite on the next `--apply`), kept a 4th pace formula and its own Ely copy, and a hot-race dry-run silently wrote `athlete.json`. Now: `vdot_math.jd_paces`, shared Ely, writes only with `--apply`.
+- **Skill file / AGENTS.md contradicted v1.8** (Karvonen-only zones, `daily_brief.readiness_assess`, taper ≤10 d, decoupling 3/8 %, "elliptical not counted"). Synced to v7.1.
+
+### Fixed — P1
+- Off-season recovery block reused the taper prescription → T 2×10 min on 8 Dec. New `recovery` phase (quality_max 0) in `training_plan.json`.
+- `post_session_analyzer`: easy grade used Z1+Z2 (170 bpm easy run = "A Truly aerobic") → Z1 only; HR ≥ MHR dropped from zones; Garmin watch zones labelled as JD zones; cross-training "counted in PMC" claimed for strength/walk; personal ACL / "HM PB ref 1.76" text moved to data (`injury_watch`, `form_baselines.power_hr_*`).
+- `injury_risk_detector`: ACWR silently off whenever day −14 was a rest day (confidence from a 14-day slice); ACWR mapped to no injury site; ACWR could be CRITICAL (now a soft warning).
+- `detect_session`: rule 1 never matched (display strings vs lowercase master types).
+- `training_planner`: `--chart` still ran the pre-v1.8 dynamic volume; the sessions column was built but never printed.
+- `season_summary`: blank injury lines (`site/reason` vs `signal/detail`), hardcoded "Popliteus", `--race` ignored, FM prediction without endurance factor.
+- `sleep_correlator`: paired a night's sleep with the run two days later (off by one).
+- `weather_adjuster`: HM HR ladder (to LTHR+2) applied to marathons → M-zone ceilings for ≥30 km; sweat Na over the heat-adjusted finish time.
+- `race_pace_planner`: aid stations at dist/len (7/14/21 instead of 6/12/18); segment HR drifted into Z4 on a marathon (now `race_hr_plan`); start/finish offsets made a flat 4:00 goal project 4:01; default race = first key (past) → active race. Same default fix in `nutrition_calculator` (+ "HM สั้น" text for any distance).
+- `taper_monitor` read evening BB (false AT RISK); `training_load` warned "overreaching" on a CTL **drop**; `heat_acclimation` credited AC-gym treadmill runs as heat exposure, kept its own WBGT table, double-counted the bonus, assumed 100 % retention for any race; `form_tracker` / `lt2_analyzer` still used the pre-v1.8 easy ceiling; `lt2_analyzer` main-block floor 11 km/h hardcoded.
+
+### Fixed — P2/P3
+- Readiness: missing HRV (watch off) downgraded quality → CAUTION only. HRV crash streak stitched non-consecutive nights. `ZONE_PCT` rounding flipped HR at a bound into the wrong zone.
+- `garmin_client` overwrote good morning sleep/HRV with a later partial fetch's None; `energy_efficiency_scorer` fell back to whole-day BB for `bb_source: unavailable`; `activity_loader` re-hit Garmin per limit, didn't dedupe, non-atomic write; `race_registry` / `training_planner` didn't fall back to example files; `load_athlete_context` didn't refresh nutrition/pain/pace overrides.
+- `daily_brief`: run tips/post-run drink on REST days; treadmill tip said "HR" on pace days; "(7-day rolling)" was Mon–today; TSB projection labelled as the all-rest upper bound.
+- Session types: Repetition and Marathon Pace keep their identity in the log; weekly report maps tempo → M and keys by activity (two runs a day).
+- `run_post_run.sh` crashed on macOS bash 3.2 (`${VAR^^}`) and called `detect_session` (live Garmin) 4×; `run_post_long.sh` didn't sync first; `check_before_push.sh` didn't guard the v1.8 personal files or run unit tests.
+
+### Added
+- **Venue label** (`athlete.json → training_venue`): 🏠 ลู่ / 🌳 outdoor on every plan day — easy + E-only long on the treadmill, quality + long with M outdoor (athlete's rule 2026-11-19).
+- `athlete.json`: `training_venue`, `injury_watch`, `form_baselines.grade_cadence_*`/`power_hr_*`; `races.json`: per-race `recovery`; `training_plan.json`: `recovery` prescription, phase `long_rule`.
+- 43 regression checks → 251 suite checks; 70 unit tests.
+
+### Docs
+- Skill file v7.1, AGENTS.md and CLAUDE.md list `training_plan.json`, venue/injury data and the v1.8 rules.
+
 ## [1.8] — 2026-11-19
 
 Single sources of truth, Jack Daniels + sport-science rules enforced in code,

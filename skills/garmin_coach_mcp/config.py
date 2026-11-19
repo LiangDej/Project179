@@ -53,6 +53,10 @@ ATHLETE = {
     "coaching_constraints":   list(_AJ.get("coaching_constraints", [])),
     # Measured treadmill speed↔HR points (LT2 test) — treadmill_pace_model
     "lt2_test":               _AJ.get("lt2_test", {}),
+    # Where each session type is run (treadmill | outdoor) — daily plan label
+    "training_venue":         _AJ.get("training_venue", {}),
+    # Personal injury watch-list (shown by injury tools; empty = generic text)
+    "injury_watch":           list(_AJ.get("injury_watch", [])),
 }
 ATHLETE["hrr"] = ATHLETE["mhr"] - ATHLETE["rhr"]   # derived
 
@@ -94,8 +98,10 @@ def _zone_list(b: dict) -> list:
 
 
 def _zone_pct(b: dict, rhr: int, hrr: int) -> dict:
-    """%HRR upper bound per zone (classification thresholds)."""
-    return {k: round((b[z][1] - rhr) / hrr * 100) for k, z in
+    """%HRR upper bound per zone (classification thresholds). Not rounded to
+    an int — rounding flipped HR exactly at a bound (e.g. 154) into the wrong
+    zone vs HR_ZONE_BOUNDS (v1.8.1)."""
+    return {k: round((b[z][1] - rhr) / hrr * 100, 3) for k, z in
             (("E", "Z1_E"), ("M", "Z2_M"), ("T", "Z3_T"), ("I", "Z4_I"))}
 
 
@@ -129,11 +135,12 @@ NUTRITION = {
 }
 
 
-def _day_nutrition() -> dict:
-    q = _AJ.get("quality_nutrition", {})
-    lo = _AJ.get("long_run_nutrition", {}).get("outdoor", {})
-    rd = _AJ.get("race_day_nutrition", {})
-    sn = _AJ.get("session_nutrition", {})
+def _day_nutrition(src: dict | None = None) -> dict:
+    src = _AJ if src is None else src
+    q = src.get("quality_nutrition", {})
+    lo = src.get("long_run_nutrition", {}).get("outdoor", {})
+    rd = src.get("race_day_nutrition", {})
+    sn = src.get("session_nutrition", {})
     pre = sn.get("pre_base", "")
 
     def _fuel(d):
@@ -280,7 +287,8 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
         "name": profile.get("name", ATHLETE["name"]),
         "rhr": int(profile.get("rhr", ATHLETE["rhr"])),
         "mhr": int(profile.get("mhr", ATHLETE["mhr"])),
-        "weight_kg": float(profile.get("weight_kg", ATHLETE["weight_kg"])),
+        "weight_kg": (float(profile["weight_kg"]) if profile.get("weight_kg") is not None
+                      else ATHLETE.get("weight_kg")),
         "vdot": float(profile.get("vdot", ATHLETE["vdot"])),
         "vdot_source": profile.get("vdot_source", ATHLETE["vdot_source"]),
         "vdot_calibration_date": profile.get("vdot_calibration_date", ATHLETE["vdot_calibration_date"]),
@@ -288,6 +296,9 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
         "vdot_heat_adj_estimate": profile.get("vdot_heat_adj_estimate", ATHLETE["vdot_heat_adj_estimate"]),
         "tt_scheduled": profile.get("tt_scheduled", ATHLETE["tt_scheduled"]),
         "lthr": float(profile.get("lthr", ATHLETE["lthr"])),
+        "pain_status": profile.get("pain_status", ATHLETE.get("pain_status", "none")),
+        "fm_endurance_factor": float(profile.get("fm_endurance_factor", ATHLETE.get("fm_endurance_factor", 1.0))),
+        "coaching_constraints": list(profile.get("coaching_constraints", ATHLETE.get("coaching_constraints", []))),
     }
     athlete_updates["hrr"] = athlete_updates["mhr"] - athlete_updates["rhr"]
     ATHLETE.update(athlete_updates)
@@ -299,6 +310,22 @@ def load_athlete_context(anon_user_id: str = None, line_user_id: str = None) -> 
     HR_ZONES.clear(); HR_ZONES.extend(_zone_list(_b))
     ZONE_PCT.clear(); ZONE_PCT.update(_zone_pct(_b, ATHLETE["rhr"], ATHLETE["hrr"]))
     VDOT_PACES.clear(); VDOT_PACES.update(_jd_paces(ATHLETE["vdot"]))
+    VDOT_PACES.update({k: tuple(v) for k, v in (profile.get("pace_overrides_sec") or {}).items()
+                       if not k.startswith("_")})
+    # nutrition products / protocol from the profile too (v1.8.1: kept the
+    # file athlete's values for every DB athlete)
+    _np = profile.get("nutrition_products") or {}
+    for k_cfg, k_prof in (("prevo_na_mg", "prevo_na_mg"), ("aminovital_na_mg", "aminovital_na_mg"),
+                          ("aminovital_carb_g", "aminovital_carb_g"),
+                          ("electrolyte_name", "electrolyte_name"), ("gel_name", "gel_name")):
+        if k_prof in _np:
+            NUTRITION[k_cfg] = _np[k_prof]
+    if "sweat_na_mmol" in profile:
+        NUTRITION["sweat_na_mmol"] = profile["sweat_na_mmol"]
+    if "race_day_nutrition" in profile:
+        NUTRITION["in_race_schedule"] = (profile["race_day_nutrition"] or {}).get("in_race_schedule")
+    if any(k in profile for k in ("quality_nutrition", "long_run_nutrition", "race_day_nutrition", "session_nutrition")):
+        DAY_NUTRITION.clear(); DAY_NUTRITION.update(_day_nutrition(profile))
 
     # Load custom baselines if present
     if "baselines" in profile:

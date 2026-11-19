@@ -41,9 +41,10 @@ Usage:
     # ไม่ใส่ --temp → ERROR (ต้องระบุเสมอ เพื่อให้ระบบ guard ได้)
 """
 
+from __future__ import annotations
+
 import sys
 import json
-import math
 import argparse
 from datetime import date
 from pathlib import Path
@@ -53,7 +54,8 @@ BASE_DIR     = TOOLS_DIR.parent
 ATHLETE_JSON = BASE_DIR / "athlete.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
-from vdot_math import compute_vdot as _vdot_math_compute  # noqa: E402
+from vdot_math import compute_vdot as _vdot_math_compute, jd_paces  # noqa: E402
+from bangkok_climate import ely_penalty_fraction  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Race distances (metres)
@@ -69,40 +71,16 @@ DISTANCES = {
 HOT_THRESHOLD_C = 20.0
 
 # ---------------------------------------------------------------------------
-# JD %VO2max targets per zone
-# ---------------------------------------------------------------------------
-ZONE_PCT = {
-    "E_lo":  0.74,
-    "E_hi":  0.65,
-    "M":     0.83,
-    "T":     0.88,
-    "I":     1.00,
-    "R":     1.05,
-}
-
-RANGE_WIDTH = {
-    "E": 30,
-    "M": 10,
-    "T": 10,
-    "I": 10,
-    "R": 10,
-}
-
-
-# ---------------------------------------------------------------------------
-# Ely et al. 2007 — Heat correction
+# Heat correction — the shared Ely model (bangkok_climate), not a copy
 # ---------------------------------------------------------------------------
 def ely_heat_correction(temp_c: float) -> float:
-    """Return pace penalty factor (e.g. 0.068 = 6.8% slower).
-    Ely et al. 2007: each °C above 13°C adds 0.4% to finish time.
-    """
-    return max(0.0, (temp_c - 13.0) * 0.004)
+    """Pace penalty fraction (e.g. 0.068 = 6.8 % slower) — bangkok_climate."""
+    return ely_penalty_fraction(temp_c)
 
 
 def heat_adjusted_duration(duration_s: float, temp_c: float) -> float:
     """Return cool-equivalent duration (faster = higher VDOT)."""
-    penalty = ely_heat_correction(temp_c)
-    return duration_s / (1 + penalty)
+    return duration_s / (1 + ely_heat_correction(temp_c))
 
 
 # ---------------------------------------------------------------------------
@@ -122,40 +100,9 @@ def compute_vdot(dist_m: float, duration_s: float) -> float:
     return round(result, 1) if result else 0.0
 
 
-def velocity_at_vo2(vo2_target: float) -> float:
-    a, b, c = 0.000104, 0.182258, -(vo2_target + 4.60)
-    discriminant = b**2 - 4 * a * c
-    if discriminant < 0:
-        raise ValueError("No real solution for given VO2 target")
-    return (-b + math.sqrt(discriminant)) / (2 * a)
-
-
-def pace_sec_from_velocity(v_m_min: float) -> int:
-    return round(60_000 / v_m_min)
-
-
-def compute_paces(vdot: float) -> dict:
-    paces = {}
-    for zone, pct in ZONE_PCT.items():
-        v = velocity_at_vo2(vdot * pct)
-        paces[zone] = pace_sec_from_velocity(v)
-    return paces
-
-
 def fmt_pace(sec: int) -> str:
-    m, s = divmod(sec, 60)
-    return f"{m}:{s:02d}/km"
-
-
-def build_vdot_paces(paces: dict) -> dict:
-    half = {k: v // 2 for k, v in RANGE_WIDTH.items()}
-    return {
-        "E": (paces["E_lo"] - half["E"], paces["E_lo"] + half["E"]),
-        "M": (paces["M"]    - half["M"], paces["M"]    + half["M"]),
-        "T": (paces["T"]    - half["T"], paces["T"]    + half["T"]),
-        "I": (paces["I"]    - half["I"], paces["I"]    + half["I"]),
-        "R": (paces["R"]    - half["R"], paces["R"]    + half["R"]),
-    }
+    m, s_ = divmod(int(sec), 60)
+    return f"{m}:{s_:02d}/km"
 
 
 # ---------------------------------------------------------------------------
@@ -176,19 +123,18 @@ def read_current_vdot() -> int:
     return _load_athlete().get("vdot")
 
 
-def apply_to_athlete_json(new_vdot: int, new_paces: dict,
-                           calibration_source: str, heat_adj_estimate: float | None) -> bool:
-    """Update vdot + vdot_paces_sec + calibration metadata in athlete.json.
-    config.py re-derives ATHLETE/VDOT_PACES from these fields on every
-    import (see skills/garmin_coach_mcp/config.py) — no other file to touch.
-    """
+def apply_to_athlete_json(new_vdot: int, calibration_source: str,
+                          heat_adj_estimate: float | None) -> bool:
+    """Update vdot + calibration metadata in athlete.json. Paces are NOT
+    stored (v1.8: config derives them from vdot via vdot_math.jd_paces);
+    a stale vdot_paces_sec key is removed if present."""
     data = _load_athlete()
     data["vdot"]                  = new_vdot
     data["vdot_source"]           = calibration_source
     data["vdot_calibration_date"] = date.today().isoformat()
     data["vdot_calibration"]      = "confirmed"
     data["vdot_heat_adj_estimate"] = round(heat_adj_estimate, 1) if heat_adj_estimate else None
-    data["vdot_paces_sec"] = {zone: list(new_paces[zone]) for zone in ("E", "M", "T", "I", "R")}
+    data.pop("vdot_paces_sec", None)
     _save_athlete(data)
     return True
 
@@ -275,22 +221,23 @@ def main():
         print(f"      เหตุผล: race HR confounded by heat + adrenaline + cardiovascular drift")
         print(f"              raw VDOT underestimates fitness จริง {heat_vdot - raw_vdot:.1f} จุด")
         print(f"\n   ✅ สิ่งที่ต้องทำ:")
-        print(f"      1. บันทึก heat-adj estimate = {heat_vdot} ไว้ใน config (vdot_heat_adj_estimate)")
+        print(f"      1. บันทึก heat-adj estimate = {heat_vdot} ลง athlete.json (vdot_heat_adj_estimate) — ต้องใส่ --apply")
         print(f"      2. ทำ 30-min TT บน TM ใน 20°C controlled conditions")
         print(f"      3. รัน: python3 post_race_updater.py {args.race} [TT_time] --tt-confirmed --apply")
-        print(f"\n   📌 heat-adj VDOT = {heat_vdot} บันทึกไว้แล้ว (ไม่ได้ apply เข้า zones)")
-
-        # Update only heat_adj_estimate in athlete.json (not vdot itself)
-        data = _load_athlete()
-        data["vdot_heat_adj_estimate"] = heat_vdot
-        _save_athlete(data)
-        print(f"   💾 athlete.json → vdot_heat_adj_estimate = {heat_vdot} (updated)")
+        # Only heat_adj_estimate (never vdot) — and only with --apply
+        # (v1.8.1: a dry-run used to write athlete.json silently).
+        if args.apply:
+            data = _load_athlete()
+            data["vdot_heat_adj_estimate"] = heat_vdot
+            _save_athlete(data)
+            print(f"   💾 athlete.json → vdot_heat_adj_estimate = {heat_vdot} (updated, zones unchanged)")
+        else:
+            print(f"   💡 Dry-run — เพิ่ม --apply เพื่อบันทึก heat-adj estimate (zones ไม่เปลี่ยน)")
         print(f"\n{'='*60}\n")
         return
 
     # ── Cool race or TT → compute paces ─────────────────────────────────────
-    paces      = compute_paces(apply_vdot)
-    new_ranges = build_vdot_paces(paces)
+    new_ranges = jd_paces(apply_vdot)   # same derivation config.py uses
 
     print(f"\n🏃 New Training Paces (VDOT {apply_vdot}):")
     zone_labels = {"E": "Easy (E)", "M": "Marathon (M)", "T": "Threshold (T)",
@@ -307,13 +254,13 @@ def main():
 
     if args.apply:
         new_vdot_int = round(apply_vdot)
-        apply_to_athlete_json(new_vdot_int, new_ranges, calibration_source, heat_vdot)
+        apply_to_athlete_json(new_vdot_int, calibration_source, heat_vdot)
         print(f"\n✅ athlete.json updated (single source — config.py re-derives on next import):")
         print(f"   vdot                  = {new_vdot_int}")
         print(f"   vdot_source           = {calibration_source}")
         print(f"   vdot_calibration_date = {date.today().isoformat()}")
         print(f"   vdot_calibration      = confirmed")
-        print(f"   vdot_paces_sec        = updated (all 5 zones)")
+        print(f"   paces                 = derived from vdot by config (not stored)")
     else:
         print(f"\n💡 Dry-run — เพิ่ม --apply เพื่ออัปเดต athlete.json จริง")
 

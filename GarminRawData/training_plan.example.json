@@ -1,6 +1,6 @@
 {
   "_comment": "SINGLE SOURCE for the season plan (phases + workout specs). config.py reads this; workouts are specs, not text — paces/HR are filled from VDOT/zones at render time and reps are capped by JD rules (jd_rules.py). Edit freely; not protected code.",
-  "_spec_help": "quality type: T|I|R|M with reps + rep_min|rep_km|rep_m (+rest), or km; 'combo' with parts[]; 'E+strides' (km, strides); 'easy' (km). long: start_km→peak_km across the phase, m_finish_km = M-pace finish. weekly_km: [first week, last week] of the phase (km/wk) — deload every 4th week = 80 %, except taper.",
+  "_spec_help": "quality type: T|I|R|M with reps + rep_min|rep_km|rep_m (+rest), or km; 'combo' with parts[]; 'E+strides' (km, strides); 'easy' (km). long: start_km→peak_km across the phase, m_finish_km = M-pace finish. weekly_km: [first week, last week] of the phase (km/wk) — deload every 4th week = 80 %, except taper. phase long_rule: 'marathon' = JD marathon-plan long-run limit (≤150 min, no %-of-week cap) for marathon build/race-specific; default 'general' = ≤25–30 % of week and ≤150 min. phase 'recovery' = easy only.",
   "phases": [
     {
       "name": "Base",
@@ -30,7 +30,8 @@
       "weekly_km": [
         55,
         60
-      ]
+      ],
+      "long_rule": "marathon"
     },
     {
       "name": "Taper",
@@ -144,6 +145,16 @@
         "peak_km": 12,
         "m_finish_km": 0,
         "note": "ไม่เพิ่ม stress"
+      }
+    },
+    "recovery": {
+      "focus": "ฟื้นตัว off-season — easy ล้วน ไม่มี quality (gate: เข่าไม่เจ็บ 14 วัน, RHR กลับ baseline, HRV balanced)",
+      "quality_max": 0,
+      "long": {
+        "start_km": 10,
+        "peak_km": 12,
+        "m_finish_km": 0,
+        "note": "100% E"
       }
     }
   },

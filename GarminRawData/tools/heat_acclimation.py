@@ -43,7 +43,10 @@ MHR = ATHLETE["mhr"]
 # Race date — SINGLE SOURCE: races.json (active race).
 try:
     from race_registry import active_race
-    RACE_DATE = date.fromisoformat(active_race()["date"])
+    _RACE = active_race()
+    RACE_DATE = date.fromisoformat(_RACE["date"])
+    RACE_NAME = _RACE.get("name", "A-race")
+    RACE_TEMP = _RACE.get("expected_temp_c")
 except Exception:
     print("❌ race_registry unavailable — check GarminRawData/races.json exists and is valid")
     print("   Fix: cp GarminRawData/races.example.json GarminRawData/races.json")
@@ -52,11 +55,13 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Bangkok monthly WBGT (6 AM training time — Stull 2011 approx)
 # ---------------------------------------------------------------------------
-BANGKOK_WBGT = {
-    1: 21.0, 2: 22.5, 3: 24.0, 4: 25.5,
-    5: 26.5, 6: 26.8, 7: 26.5, 8: 26.5,
-    9: 26.2, 10: 25.0, 11: 23.5, 12: 21.5,
-}
+# Derived from the ONE climate table (bangkok_climate) + Stull WBGT
+# (weather_adjuster.calc_wbgt) — was a separate hand-typed table (v1.8.1).
+from bangkok_climate import BANGKOK_CLIMATE  # noqa: E402
+from weather_adjuster import calc_wbgt  # noqa: E402
+BANGKOK_WBGT = {m: round(calc_wbgt(t, rh), 1) for m, (t, rh, _dew, _wind) in BANGKOK_CLIMATE.items()}
+INDOOR_TYPES = {"treadmill_running", "indoor_running"}   # AC gym ≠ heat exposure
+COOL_RACE_C = 20.0   # race expected below this → acclimation not race-relevant
 
 # WBGT → heat stress multiplier for TRIMP
 # Below 21°C (temperate): no heat stress bonus
@@ -141,6 +146,8 @@ def load_heat_trimp(days: int = 90) -> dict[str, dict]:
         if d < cutoff:
             continue
 
+        if (a.get("activityType") or {}).get("typeKey") in INDOOR_TYPES:
+            continue   # indoor treadmill: no outdoor heat stress (v1.8.1)
         avg_hr   = a.get("averageHR", 0) or 0
         dur_sec  = a.get("duration", 0) or 0
         trimp    = calc_trimp(avg_hr, dur_sec)
@@ -154,7 +161,7 @@ def load_heat_trimp(days: int = 90) -> dict[str, dict]:
         ds = str(d)
         if ds not in daily:
             daily[ds] = {"trimp": 0.0, "h_trimp": 0.0, "wbgt": wbgt,
-                         "mult": mult, "bonus": bonus, "sessions": 0}
+                         "mult": mult, "bonus": 0.0, "sessions": 0}   # was init to bonus then += (double count)
         daily[ds]["trimp"]    += trimp
         daily[ds]["h_trimp"]  += h_trimp
         daily[ds]["bonus"]    += bonus
@@ -221,8 +228,11 @@ def analyze(days: int = 60) -> dict:
 
     days_to_race  = (RACE_DATE - today).days
 
-    # Hot Weather Model: 100% of adaptation is retained on race day since we stay in the heat!
-    score_race_day  = score_now
+    # Hot race at home: adaptation is kept (still training in the heat).
+    # Cool race (expected < COOL_RACE_C): heat adaptation is not what limits
+    # the race — report it decaying instead of "100 % retained" (v1.8.1).
+    cool_race = RACE_TEMP is not None and float(RACE_TEMP) < COOL_RACE_C
+    score_race_day = acclimation_retained(max(0, days_to_race), score_now) if cool_race else score_now
     pv_race = min(10.0, score_race_day / ACCL_THRESHOLD_GOOD * 10)
     pv_race_perf = round(pv_race * 0.4, 1)  # heat pace protection (conservative)
 
@@ -258,6 +268,7 @@ def analyze(days: int = 60) -> dict:
     })
 
     return {
+        "cool_race":      cool_race,
         "as_of": str(today),
         "score": score_now,
         "status": accl_status,
@@ -281,7 +292,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--days",      type=int, default=60)
     parser.add_argument("--race-plan", action="store_true",
-                        help="Show Thailand Local Race transition timeline")
+                        help="(kept for compatibility — the race plan is always shown)")
     args = parser.parse_args()
 
     r = analyze(args.days)
@@ -322,11 +333,14 @@ def main():
 
     print()
 
-    if args.race_plan or True:   # always show transition plan
-        print(f"🏃‍♂️ Thailand Local Race Acclimation Plan:")
+    if True:   # always show the race plan
+        print(f"🏃‍♂️ {RACE_NAME} — Heat Acclimation Plan:")
         print(f"   Days to race          : {r['days_to_race']}d ({RACE_DATE})")
         print(f"   Acclimation score now : {r['score']}")
-        print(f"   Score on race day     : ~{r['score_race_day']:.0f}  (100% adaptation retained)")
+        if r["cool_race"]:
+            print(f"   Score on race day     : ~{r['score_race_day']:.0f}  (สนามเย็น {RACE_TEMP}°C — heat acclimation ไม่ใช่ตัวจำกัด, decay ตามธรรมชาติ)")
+        else:
+            print(f"   Score on race day     : ~{r['score_race_day']:.0f}  (ยังซ้อมในอากาศร้อน → คงไว้ได้)")
         print()
 
         print(f"   Pace protection on race day : ~+{r['pv_race_perf']:.1f}% pace protection")

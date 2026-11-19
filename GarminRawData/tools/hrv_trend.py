@@ -128,23 +128,33 @@ def crash_report(records: list[dict]) -> dict:
     range (v1.7.2; was 7-day status, which counted one race 3–5 times).
     """
 
-    # Count current streak of suppressed HRV (most recent first)
+    def _adjacent(a, b):
+        """consecutive calendar nights (records without _date: assume yes)"""
+        da, db = a.get("_date"), b.get("_date")
+        return da is None or db is None or abs((da - db).days) == 1
+
+    # Count current streak of suppressed nights — calendar-consecutive only
+    # (v1.8.1: missing wellness days used to stitch separate bad nights)
     streak = 0
+    prev = None
     for r in reversed(records):
-        if is_suppressed(r):
+        if is_suppressed(r) and (prev is None or _adjacent(r, prev)):
             streak += 1
+            prev = r
         else:
             break
 
     # Find longest crash streak in full window
     max_streak = 0
     cur = 0
+    prev = None
     for r in records:
         if is_suppressed(r):
-            cur += 1
+            cur = cur + 1 if (prev is not None and is_suppressed(prev) and _adjacent(r, prev)) else 1
             max_streak = max(max_streak, cur)
         else:
             cur = 0
+        prev = r
 
     # Severity classification
     if streak == 0:
@@ -174,7 +184,7 @@ def crash_report(records: list[dict]) -> dict:
     else:
         severity   = "overreach"
         emoji      = "🚨"
-        headline   = f"OVERREACHING ALARM — HRV ต่ำกว่าช่วงปกติ {streak} คืนติด (>5)"
+        headline   = f"OVERREACHING ALARM — HRV ต่ำกว่าช่วงปกติ {streak} คืนติด (≥5)"
         advice     = [
             "หยุดซ้อม 3–5 วัน recovery block ทันที",
             "Easy walk หรือ yoga เท่านั้น — ห้ามวิ่ง",

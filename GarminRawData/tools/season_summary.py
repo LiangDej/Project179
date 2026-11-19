@@ -53,8 +53,8 @@ def main():
     print(f"\n📅 SEASON PLAN")
     print(SEP)
     try:
-        from training_planner import get_week_info
-        wi = get_week_info()
+        from training_planner import week_plan
+        wi = week_plan(race_key=args.race)   # honour --race (was always the active race)
         phase       = wi["phase"].replace("_", " ").title()
         week_num    = wi["week_num"]
         total_weeks = wi["total_weeks"]
@@ -87,7 +87,11 @@ def main():
         hm_h, hm_m = divmod(int(hm_min), 60)
         fm_h, fm_m = divmod(int(fm_min), 60)
         print(f"   HM predicted : {hm_h}h {hm_m:02d}min")
-        print(f"   FM predicted : {fm_h}h {fm_m:02d}min")
+        print(f"   FM predicted : {fm_h}h {fm_m:02d}min  (pure VDOT)")
+        _f = ATHLETE.get("fm_endurance_factor") or 1.0
+        if _f != 1.0:
+            fa_h, fa_m = divmod(int(fm_min * _f), 60)
+            print(f"   FM realistic : {fa_h}h {fa_m:02d}min  (× endurance factor {_f})")
     except Exception:
         pass
     print(f"   E  (Easy)    : {fmt_pace(VDOT_PACES['E'][0])}–{fmt_pace(VDOT_PACES['E'][1])}")
@@ -185,9 +189,9 @@ def main():
         risks   = risk.get("risks", [])
         print(f"   {overall}")
         for r in risks[:3]:
-            print(f"   ⚠️  {r.get('site','')} — {r.get('reason','')}")
-        if not risks:
-            print("   Watch: Popliteus + Hamstring ขวา")
+            print(f"   ⚠️  {r.get('signal','')} — {r.get('detail','')}")
+        if not risks and ATHLETE.get("injury_watch"):
+            print(f"   Watch: {', '.join(ATHLETE['injury_watch'])}")
     except Exception as e:
         print(f"   ⚠️  Injury risk error: {e}")
 

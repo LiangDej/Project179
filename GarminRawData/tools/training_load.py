@@ -229,7 +229,7 @@ def race_plan_targets():
   Race Day           | 60–70      | CTL maintained, ATL drops
   ─────────────────────────────────────────────────
   Notes:
-  • สร้าง CTL ไม่เกิน +3–5 ต่อสัปดาห์ (10% rule applies)
+  • สร้าง CTL ไม่เกิน +3–5 ต่อสัปดาห์ (JD: เพิ่ม volume ทีละขั้น คงระดับ 3–4 สัปดาห์)
   • ถ้า TSB ต่ำกว่า -30 ต่อเนื่อง 2 สัปดาห์ → ลด Volume ทันที
   • Target Race Day TSB: +10 ถึง +25 (Fresh แต่ไม่ sluggish)
 {'='*65}""")
@@ -273,8 +273,10 @@ def main():
         ctl_delta  = ctl - ctl_7d_ago
         arrow = "↑" if ctl_delta > 0 else "↓"
         print(f"  📈 CTL 7-day Δ   : {arrow}{abs(ctl_delta):.1f}  ", end="")
-        if abs(ctl_delta) > 5:
+        if ctl_delta > 5:
             print("⚠️  เพิ่มเร็วเกินไป — เสี่ยง Overreaching")
+        elif ctl_delta < -5:
+            print("ℹ️  ลดลงเร็ว — ปกติช่วง taper/recovery")
         elif ctl_delta > 0:
             print("✅ กำลังสร้าง Fitness อย่างปลอดภัย")
         else:

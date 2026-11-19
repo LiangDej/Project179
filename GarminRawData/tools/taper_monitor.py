@@ -113,7 +113,8 @@ def _get_bb_from_cache() -> int | None:
         today_str = date.today().strftime("%Y-%m-%d")
         cached = _load_health_cache(today_str)
         if cached:
-            return cached.get("body_battery")
+            # morning peak, like daily_brief — evening BB is already spent
+            return cached.get("bb_high") if cached.get("bb_high") is not None else cached.get("body_battery")
     except Exception:
         pass
     return None

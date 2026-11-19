@@ -27,17 +27,22 @@ including any new tool added to that directory in the future.
   it.
 
 **This approval requirement does NOT apply to `athlete.json`, `races.json`,
-or any other data file** — those are meant to be edited freely, no
+`training_plan.json`, or any other data file** — those are meant to be edited freely, no
 confirmation needed. That includes first-time onboarding (copying
-`athlete.example.json`/`races.example.json` to `athlete.json`/`races.json`
-and filling in the athlete's real values): just write the files directly.
+`athlete.example.json`/`races.example.json`/`training_plan.example.json` to
+`athlete.json`/`races.json`/`training_plan.json` and filling in the athlete's
+real values): just write the files directly.
 
 ## Single sources of truth
 
 | Value | Edit here (data, not code) |
 |---|---|
-| VDOT, LTHR, RHR, MHR, weight, paces, HR-zone %, nutrition products | `GarminRawData/athlete.json` |
-| Race targets (date/distance/goal/stations) | `GarminRawData/races.json` |
+| VDOT, LTHR, RHR, MHR, weight, HR-zone %, nutrition, form baselines, training venue (paces are derived from VDOT) | `GarminRawData/athlete.json` |
+| Race targets (date/distance/goal tiers/stations/course/recovery) | `GarminRawData/races.json` |
+| Season plan: phases (dates, weekly_km, long_rule) + workout specs | `GarminRawData/training_plan.json` |
+
+No literal HR/pace/race/product/date values in tool code — `test_suite.py`
+fails on them (AST scan).
 
 Full details, bash commands, test suite instructions, and data-file
 reference: see [`CLAUDE.md`](CLAUDE.md).

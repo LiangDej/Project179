@@ -449,7 +449,10 @@ def sync_wellness_day(client, date_str: str) -> dict:
     # flat top-level superset (จาก latest snapshot + computed)
     latest = snaps[-1]
     for k in _HEALTH_KEYS:
-        master[k] = latest.get(k)
+        # newest NON-null value: a partial API failure later in the day must
+        # not wipe the morning's sleep/HRV numbers to None (v1.8.1)
+        v = next((s.get(k) for s in reversed(snaps) if s.get(k) is not None), None)
+        master[k] = v
     master["bb_morning"]           = morning_bb
     master["bb_morning_confirmed"] = morning_bb is not None
     master["bb_latest"]            = latest.get("body_battery")

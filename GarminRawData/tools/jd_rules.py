@@ -14,7 +14,11 @@ JD limits (Daniels' Running Formula, 3rd ed., ch. 4):
       basic T workout) is always allowed — so low-volume weeks still get T
   I   per session ≤ lesser of 8 % weekly volume or 10 km
   R   per session ≤ lesser of 5 % weekly volume or 8 km
-  L   long run ≤ 25 % weekly volume (30 % if < 64 km/wk) and ≤ 150 min
+  L   long run ≤ 25 % weekly volume (30 % if < 64 km/wk) and ≤ 150 min —
+      the % part is made monotonic (no drop at 64 km/wk: 30 % of 64 km is
+      the floor above it). Marathon build / race-specific phases
+      (training_plan.json long_rule "marathon") use JD's marathon-plan limit:
+      ≤ 150 min only, no %-of-week cap.
 T/I/R are prescribed by PACE (HR lags in 3–5 min reps and wrist HR can lock
 onto cadence); HR is shown only as a ceiling.
 """
@@ -66,23 +70,37 @@ def quality_cap_km(kind: str, weekly_km: float | None, pace: tuple | None = None
     return round(cap, 1)
 
 
-def long_run_cap(weekly_km: float | None, e_pace: tuple) -> tuple[float | None, str]:
-    """(max long-run km, reason) — lesser of %-of-week and 150 min at E pace."""
+def _pct_cap(weekly_km: float) -> tuple[float, str]:
+    """Monotonic %-of-week cap: 30 % below 64 km/wk; above, the larger of
+    25 % and the 30 %-of-64 km value (v1.8.1 — 63 km gave 18.9, 64 gave 16.0)."""
+    if weekly_km < LONG_LOW_VOL_KM:
+        return weekly_km * LONG_PCT_LOW_VOL, f"JD ≤30% ของ {weekly_km:g} km/สัปดาห์"
+    floor = LONG_LOW_VOL_KM * LONG_PCT_LOW_VOL
+    hi = weekly_km * LONG_PCT_HIGH_VOL
+    if hi >= floor:
+        return hi, f"JD ≤25% ของ {weekly_km:g} km/สัปดาห์"
+    return floor, f"JD ≤{floor:g} km (30% ของ {LONG_LOW_VOL_KM:g} km)"
+
+
+def long_run_cap(weekly_km: float | None, e_pace: tuple,
+                 rule: str = "general") -> tuple[float | None, str]:
+    """(max long-run km, reason).
+    general  : lesser of the %-of-week cap and 150 min at E pace
+    marathon : 150 min at E pace only (JD marathon plans)"""
     time_cap = LONG_MAX_MIN * 60 / mid(e_pace) if e_pace else None
-    if not weekly_km:
+    if rule == "marathon" or not weekly_km:
         return (round(time_cap, 1) if time_cap else None,
-                f"JD ≤{LONG_MAX_MIN} นาที")
-    pct = LONG_PCT_LOW_VOL if weekly_km < LONG_LOW_VOL_KM else LONG_PCT_HIGH_VOL
-    pct_cap = weekly_km * pct
+                f"JD ≤{LONG_MAX_MIN} นาที" + (" (marathon plan)" if rule == "marathon" else ""))
+    pct_cap, why = _pct_cap(weekly_km)
     if time_cap is not None and time_cap < pct_cap:
         return round(time_cap, 1), f"JD ≤{LONG_MAX_MIN} นาที"
-    return round(pct_cap, 1), f"JD ≤{int(pct * 100)}% ของ {weekly_km:g} km/สัปดาห์"
+    return round(pct_cap, 1), why
 
 
 def check_long_run(actual_km: float, actual_min: float, weekly_km: float | None,
-                   e_pace: tuple) -> str | None:
+                   e_pace: tuple, rule: str = "general") -> str | None:
     """Warning text when a completed long run broke the JD limit, else None."""
-    cap, why = long_run_cap(weekly_km, e_pace)
+    cap, why = long_run_cap(weekly_km, e_pace, rule)
     over = []
     if cap and actual_km > cap + 0.5:
         over.append(f"{actual_km:.1f} km > {cap:g} km ({why})")
@@ -141,8 +159,11 @@ def _render_part(spec: dict, weekly_km, paces: dict, zones: dict) -> dict:
     hr_txt = f" | HR เพดาน ≤{hr_cap}" if hr_cap else " | คุมด้วย pace (HR ขึ้นไม่ทันในรอบสั้น)"
     rest = f" | rec {spec['rest']}" if spec.get("rest") else ""
     head = f"{reps}×{_rep_label(spec)}" if reps > 1 or spec.get("reps") else _rep_label(spec)
+    final = dict(spec)
+    if spec.get("reps") or capped:
+        final["reps"] = reps
     return {"text": f"{head} @ {kind} {p}{hr_txt}{rest}",
-            "km": round(reps * rep_km, 1), "kind": kind, "capped": capped}
+            "km": round(reps * rep_km, 1), "kind": kind, "capped": capped, "spec": final}
 
 
 def render_quality(spec: dict, weekly_km: float | None, paces: dict, zones: dict) -> dict:
@@ -156,28 +177,40 @@ def render_quality(spec: dict, weekly_km: float | None, paces: dict, zones: dict
     e = paces["E"]
     if t == "easy":
         return {"type": "easy", "workout": f"Easy {spec.get('km', 6)}km | {fmt_pace(e[0])}–{fmt_pace(e[1])}/km | HR < {e_ceil}",
-                "note": spec.get("note", ""), "quality_km": 0.0, "capped": []}
+                "note": spec.get("note", ""), "quality_km": 0.0, "capped": [], "spec": dict(spec)}
     if t == "E+strides":
-        return {"type": t,
+        return {"type": t, "spec": dict(spec),
                 "workout": (f"{spec.get('km', 8)}km E {fmt_pace(e[0])}–{fmt_pace(e[1])}/km (HR < {e_ceil}) "
                             f"+ {spec.get('strides', 6)}×Strides 20วิ @ R {fmt_pace(paces['R'][0])}/km"),
                 "note": spec.get("note", ""), "quality_km": 0.0, "capped": []}
     parts = spec["parts"] if t == "combo" else [spec]
     rendered = [_render_part(p, weekly_km, paces, zones) for p in parts]
+    final = ({**spec, "parts": [r["spec"] for r in rendered]} if t == "combo" else rendered[0]["spec"])
     return {"type": t if t != "combo" else "+".join(p["kind"] for p in rendered),
+            "spec": final,
             "workout": " + ".join(r["text"] for r in rendered),
             "note": spec.get("note", ""),
             "quality_km": round(sum(r["km"] for r in rendered), 1),
             "capped": [r["capped"] for r in rendered if r["capped"]]}
 
 
-def render_long(spec: dict, km: float, paces: dict, zones: dict) -> str:
-    """Long-run text: E pace + optional M-pace finish (M km capped by JD M rule)."""
+def long_m_finish(spec: dict, km: float, weekly_km: float | None = None) -> float:
+    """M-pace finish km: ≤ half the run and ≤ the JD M cap (20 % week / 29 km)."""
+    mf = float(spec.get("m_finish_km") or 0)
+    if not mf:
+        return 0.0
+    mf = min(mf, km * 0.5)
+    cap = quality_cap_km("M", weekly_km)
+    return round(min(mf, cap) if cap else mf, 1)
+
+
+def render_long(spec: dict, km: float, paces: dict, zones: dict,
+                weekly_km: float | None = None) -> str:
+    """Long-run text: E pace + optional M-pace finish (see long_m_finish)."""
     e, m = paces["E"], paces["M"]
     txt = f"{km:g}km E {fmt_pace(e[0])}–{fmt_pace(e[1])}/km (HR < {zones['Z1_E'][1]})"
-    mf = float(spec.get("m_finish_km") or 0)
+    mf = long_m_finish(spec, km, weekly_km)
     if mf:
-        mf = min(mf, km * 0.5)
         txt += f" — {mf:g} km สุดท้าย @ M {fmt_pace(m[0])}–{fmt_pace(m[1])}/km (HR ≤{zones['Z2_M'][1]})"
     if spec.get("note"):
         txt += f" | {spec['note']}"

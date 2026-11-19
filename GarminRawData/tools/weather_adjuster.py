@@ -336,10 +336,16 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
         for i in range(5)
     ]
 
-    # HR ceilings — derived from LTHR/MHR (HM ≈ threshold effort):
-    # segments build LTHR-13 → LTHR+2, final segment = MHR uncapped
+    # HR ceilings from the athlete's zones. HM ≈ threshold effort: build
+    # LTHR-13 → LTHR+2. FM = M effort: stay inside the M zone until the last
+    # segments (v1.8.1 — the HM ladder up to LTHR+2 was applied to 42 km too).
     lthr, mhr = ATHLETE["lthr"], ATHLETE["mhr"]
-    base_ceilings = [lthr - 13, lthr - 8, lthr - 3, lthr + 2, mhr]
+    m_lo, m_hi = HR_ZONE_BOUNDS["Z2_M"]
+    t_lo, t_hi = HR_ZONE_BOUNDS["Z3_T"]
+    if dist_km >= 30:
+        base_ceilings = [(m_lo + m_hi) // 2, m_hi - 3, m_hi, (t_lo + t_hi) // 2, mhr]
+    else:
+        base_ceilings = [lthr - 13, lthr - 8, lthr - 3, lthr + 2, mhr]
     adj_ceilings = [c + hr_adj for c in base_ceilings]
 
     # Electrolyte advice — computed by nutrition_calculator.py (ACSM/Sawka 2007)
@@ -352,7 +358,8 @@ def run(race: str, weather: dict, race_time_str: str = "03:30", base_pace_str: s
                                           na_requirement, RACE_CONFIG, plan_caps,
                                           schedule_plan, IN_RACE_SCHEDULE)
         rc = RACE_CONFIG[race]
-        duration_min = rc["default_duration_min"]
+        # sweat loss over the HEAT-ADJUSTED finish time, not the cool estimate
+        duration_min = rc["default_duration_min"] * (1 + penalty_pct / 100)
         sr, _, _ = sweat_rate_lhr(temp, humidity)
         na_loss = sr * duration_min / 60 * sweat_na_mgl()
         _elec = NUTRITION.get('electrolyte_name') or 'Electrolyte'

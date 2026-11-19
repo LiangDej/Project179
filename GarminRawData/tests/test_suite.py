@@ -645,7 +645,7 @@ def plausibility_tests():
     _ld = _sp.prescribe_day(_sun, bb=80, hrv="balanced", pain="none",
                             rhr=rb + 11, rhr_baseline=rb, live=True)
     check("readiness: MODIFY on a long-run day prints an easy run, not a long run",
-          _ld["decision"] == "MODIFY" and _ld["label"].startswith("🟡 Easy Run แทน Long Run"), _ld["label"])
+          _ld["decision"] == "MODIFY" and "🟡 Easy Run แทน Long Run" in _ld["label"], _ld["label"])
     check("readiness: cap_km applied to the plan distance (RHR +11 → ≤6 km)",
           _ld["spec"]["km"] <= 6, str(_ld.get("spec")))
     # form_analysis (post-run per-km form + cadence lock) — synthetic stream
@@ -951,6 +951,157 @@ def v18_tests():
           not hits, " | ".join(hits[:5]))
 
 
+def v181_tests():
+    """v1.8.1 — regressions for every finding of the v1.8 architecture review."""
+    print("\n── 12. v1.8.1 REVIEW REGRESSIONS ─────────────────────────")
+    import hashlib, subprocess
+    from datetime import date as _d, timedelta as _td
+    import config
+    import jd_rules as jd
+    import readiness as rd
+    import training_planner as tp
+    import session_prescriber as sp
+    import garmin_workout_pusher as gwp
+    import post_session_analyzer as psa
+    import race_pace_planner as rpp
+    import hrv_trend as ht
+    tools = Path(sp.__file__).parent
+    E = config.VDOT_PACES["E"]
+
+    # P0-1 archived / non-raced races never trigger JD recovery
+    _rs = [{"name": "Fuji", "date": _d(2026, 12, 13), "dist_km": 42.2, "tier": "archived", "active": False},
+           {"name": "Pacer", "date": _d(2027, 3, 1), "dist_km": 10, "tier": "C", "active": True, "recovery": False},
+           {"name": "HM", "date": _d(2027, 4, 4), "dist_km": 21.1, "tier": "B", "active": True}]
+    check("P0 recovery: archived race (Fuji) gives no recovery window", rd.post_race_recovery(_d(2026, 12, 14), _rs) is None)
+    check("P0 recovery: recovery=false race (pacer) gives none", rd.post_race_recovery(_d(2027, 3, 2), _rs) is None)
+    check("P0 recovery: a real race still does", rd.post_race_recovery(_d(2027, 4, 5), _rs) == ("HM", 1, 8))
+    _st = lambda **k: rd.readiness_assess(80, "balanced", "strength", **k)["decision"]
+    check("P0 strength: moderate pain → mobility", _st(pain="moderate", planning=True) == "MODIFY")
+    check("P0 strength: day 1 after a marathon → mobility", _st(recovery=("FM", 1, 15), planning=True) == "MODIFY")
+    check("P0 strength: RHR +8 → mobility", _st(rhr=60, rhr_baseline=50) == "MODIFY")
+    check("P0 strength: normal day → GO", _st(planning=True) == "GO")
+    _u = rd.readiness_assess(90, "unknown", "quality1", rhr=50, rhr_baseline=50)
+    check("P2 readiness: missing HRV is CAUTION, not a quality downgrade", _u["decision"] == "CAUTION", str(_u))
+
+    # P0-2 long-run cap: monotonic + marathon rule
+    caps = [jd.long_run_cap(w, E)[0] for w in range(30, 121)]
+    check("P0 long cap monotonic in weekly km (no drop at 64 km/wk)",
+          all(b >= a for a, b in zip(caps, caps[1:])), str(caps[30:40]))
+    mcap, mwhy = jd.long_run_cap(60, E, "marathon")
+    check("P0 long cap marathon rule = 150 min only (no %-of-week)",
+          abs(mcap - 150 * 60 / jd.mid(E)) < 0.1 and "marathon" in mwhy)
+    _mb = [p for p in config.TRAINING_PHASES if p.get("long_rule") == "marathon"]
+    if _mb:
+        _w = tp.week_plan(_mb[0]["start"] + _td(days=14))
+        check("P0 marathon phase long run > %-of-week cap", _w["long_km"] > jd._pct_cap(_w["km_target"])[0] - 0.5,
+              f"{_w['long_km']} vs {_w['km_target']}")
+    check("P0 render_long caps the M finish by the JD M rule",
+          jd.long_m_finish({"m_finish_km": 12}, 30, 40) == 8.0)
+
+    # P0-3 pusher
+    check("P0 pusher: REST day (readiness) builds no workout",
+          gwp.session_to_workout({"type": "quality1", "decision": "REST", "workout": "พัก", "spec": None}) is None)
+    _rest = sp.prescribe_day(_d(2027, 3, 9), bb=15, hrv="balanced", live=True)
+    check("P0 prescriber: REST carries no spec", _rest["decision"] == "REST" and _rest.get("spec") is None)
+    _lw = gwp.build_long("l", 20, *gwp.PACE["E"], m_finish_km=5)
+    check("P0 pusher: long run with M finish has an M-pace step", len(_lw.workoutSegments[0].workoutSteps) == 4)
+    _cw = gwp.build_from_spec("c", {"type": "combo", "parts": [{"type": "I", "rep_km": 1.0, "reps": 3, "rest": "90s"},
+                                                               {"type": "T", "rep_min": 5, "reps": 2, "rest": "60s"}]})
+    _orders = []
+    for st in _cw.workoutSegments[0].workoutSteps:
+        _orders.append(st.stepOrder)
+        _orders += [c.stepOrder for c in (getattr(st, "workoutSteps", None) or [])]
+    check("P0 pusher: stepOrder unique across repeat groups", len(_orders) == len(set(_orders)), str(_orders))
+    _r = jd.render_quality({"type": "combo", "parts": [{"type": "I", "rep_km": 1.0, "reps": 8}, {"type": "M", "km": 5}]},
+                           30, config.VDOT_PACES, config.HR_ZONE_BOUNDS)
+    check("P0 combo: capped reps returned in the spec", _r["spec"]["parts"][0]["reps"] < 8, str(_r["spec"]))
+    src_gwp = Path(gwp.__file__).read_text()
+    check("P0 pusher: input() guarded for non-interactive runs", "isatty()" in src_gwp)
+
+    # P0-4 post_race_updater
+    src_pru = (tools / "post_race_updater.py").read_text()
+    check("P0 updater: no vdot_paces_sec write, paces via jd_paces, shared Ely",
+          'data["vdot_paces_sec"] =' not in src_pru and "jd_paces" in src_pru and "ely_penalty_fraction" in src_pru
+          and "from __future__ import annotations" in src_pru)
+    _aj = config._ATHLETE_JSON
+    if _aj.exists():
+        _h0 = hashlib.md5(_aj.read_bytes()).hexdigest()
+        subprocess.run([sys.executable, str(tools / "post_race_updater.py"), "hm", "1:57:34", "--temp", "27",
+                        "--humidity", "82"], capture_output=True, cwd=str(tools))
+        check("P0 updater: hot-race dry-run does not touch athlete.json",
+              hashlib.md5(_aj.read_bytes()).hexdigest() == _h0)
+
+    # P0-5 skill file in sync
+    skill = (tools.parents[1] / "skills" / "garmin-coach-analyzer.md").read_text()
+    check("P0 skill file matches v1.8 (JD E, readiness.py, training_plan.json, cross-training counted)",
+          "79% HRmax" in skill and "readiness.py" in skill and "training_plan.json" in skill
+          and "ห้ามใช้ %MHR" not in skill and "ไม่ถูกนับ" not in skill)
+
+    # P1
+    _rec = [p for p in config.TRAINING_PHASES if p["phase"] == "recovery"]
+    if _rec:
+        _wr = tp.week_plan(_rec[0]["start"])
+        check("P1 recovery phase: no quality day in the week", not any(v.startswith("quality") for v in _wr["structure"].values()))
+    check("P1 easy grade uses E (Z1) only", psa.analyze_easy_run({"zone_pct": [0, 100, 0, 0, 0], "avg_hr": 170,
+                                                                    "decoupling": 3})["grade"].startswith("C"))
+    src_ird = (tools / "injury_risk_detector.py").read_text()
+    check("P1 ACWR confidence uses full load history", "pmc_confidence(load_load_activities())" in src_ird)
+    import detect_session as ds
+    check("P1 detect_session matches canonical master types", "threshold" in ds.QUALITY_TYPES)
+    src_tp = Path(tp.__file__).read_text()
+    check("P1 build_chart uses week_plan", "wp         = week_plan(week_start, race_key, target_date)" in src_tp)
+    src_ss = (tools / "season_summary.py").read_text()
+    check("P1 season_summary: signal/detail keys + --race honoured",
+          "r.get('signal'" in src_ss and "week_plan(race_key=args.race)" in src_ss)
+    check("P1 sleep_correlator pairs sleep with the same-morning run",
+          "act_by_date.get(d_str, [])" in (tools / "sleep_correlator.py").read_text())
+    _race = next(iter(rpp.RACES.values()), None)
+    if _race and _race.get("stations_km"):
+        _seg = rpp._build_segments(_race, 110.0, 40, [])
+        check("P1 race plan: segments end at the real aid stations",
+              [s["cumulative_km"] for s in _seg][:-1] == [round(k, 2) for k in _race["stations_km"]])
+        _tot = sum(s["target_pace_sec"] * s["distance_km"] for s in _seg)
+        check("P1 race plan: flat-course splits add up to the goal (±30 s)", abs(_tot - 110 * 60) <= 30, f"{_tot:.0f}s")
+    check("P1 weather: FM uses M-zone HR ceilings", "dist_km >= 30" in (tools / "weather_adjuster.py").read_text())
+    check("P1 taper_monitor reads morning-peak BB", 'cached.get("bb_high")' in (tools / "taper_monitor.py").read_text())
+    check("P1 training_load: only a CTL RISE warns of overreaching",
+          "if ctl_delta > 5:" in Path(tl_src := (tools / "training_load.py")).read_text())
+    src_ha = (tools / "heat_acclimation.py").read_text()
+    check("P1 heat_acclimation: treadmill excluded, WBGT from the shared climate table",
+          "INDOOR_TYPES" in src_ha and "BANGKOK_CLIMATE" in src_ha and "or True" not in src_ha)
+    import lt2_analyzer as lt2
+    check("P1 lt2_analyzer proposes the same zones as config (JD E)",
+          lt2.daniels_zones(config.ATHLETE["lthr"], config.ATHLETE["rhr"], config.ATHLETE["mhr"])["E"][1]
+          == config.HR_ZONE_BOUNDS["Z1_E"][1])
+
+    # P2
+    _n = lambda d, v: {"_date": d, "hrv_last_night": v, "hrv_balanced_low": 85, "hrv_balanced_high": 120}
+    _gap = [_n(_d(2026, 11, 10), 70), _n(_d(2026, 11, 13), 70), _n(_d(2026, 11, 17), 70)]
+    check("P2 HRV crash streak needs consecutive calendar nights", ht.crash_report(_gap)["streak"] == 1)
+    check("P2 ZONE_PCT not rounded to int (bound HR classified like HR_ZONE_BOUNDS)",
+          any(v != int(v) for v in config.ZONE_PCT.values()))
+    import activity_loader as al
+    check("P2 load activities deduped by activityId",
+          "merged.setdefault" in Path(al.__file__).read_text() and "os.replace" in Path(al.__file__).read_text())
+    check("P2 wellness merge keeps last non-null value",
+          "reversed(snaps)" in (tools / "garmin_client.py").read_text())
+
+    # P3
+    rpr = (tools / "run_post_run.sh").read_text()
+    check("P3 run_post_run.sh: bash 3.2 safe + one detect_session call",
+          "^^" not in rpr and rpr.count("detect_session.py") == 1
+          and subprocess.run(["/bin/bash", "-n", str(tools / "run_post_run.sh")]).returncode == 0)
+    check("P3 run_post_long.sh syncs first + strict mode",
+          "fetch_incremental.py" in (tools / "run_post_long.sh").read_text()
+          and "set -euo pipefail" in (tools / "run_post_long.sh").read_text())
+    check("P3 pre-push guards v1.8 personal files + runs unit tests",
+          "training_plan.json" in (tools / "check_before_push.sh").read_text()
+          and "tests.test_tools" in (tools / "check_before_push.sh").read_text())
+    check("venue: plan days carry the training_venue label",
+          all("venue" in s_ for s_ in sp.generate_week_plan("current", 80, "balanced", "none",
+                                                              target_monday=_d(2027, 3, 8))["sessions"]))
+
+
 def main():
     _require_athlete_data()
     print("=" * 60)
@@ -983,6 +1134,7 @@ def main():
     v171_tests()
     v172_tests()
     v18_tests()
+    v181_tests()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
     total  = len(_RESULTS)

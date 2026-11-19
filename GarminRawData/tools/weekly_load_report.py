@@ -47,7 +47,9 @@ def load_activities():
 
 
 def load_quality_map() -> dict:
-    """คืน dict {date_str: zone} จาก quality log เพื่อ override HR classification"""
+    """{activity_id: zone} (and {date: zone} fallback for rows without an id)
+    from the quality log — overrides HR classification. Keyed by activity so
+    two runs on one day don't collide (v1.8.1)."""
     try:
         from session_logger import load_quality_log   # single log (v1.7.1)
         sessions = load_quality_log()
@@ -55,16 +57,19 @@ def load_quality_map() -> dict:
         for s in sessions:
             if not isinstance(s, dict):
                 continue
-            d = s.get("date", "")[:10]
+            key = s.get("activity_id") or s.get("date", "")[:10]
             stype = s.get("session_type", "").lower()
+            z = None
             if any(k in stype for k in ("threshold", "(t)")):
-                result[d] = "T"
+                z = "T"
             elif any(k in stype for k in ("interval", "(i)", "repetition", "(r)")):
-                result[d] = "I"
-            elif any(k in stype for k in ("marathon", "(m)")):
-                result[d] = "M"
+                z = "I"
+            elif any(k in stype for k in ("marathon", "(m)", "tempo")):   # tempo = sustained M-pace
+                z = "M"
             elif "easy" in stype or "long" in stype:
-                result[d] = "E"
+                z = "E"
+            if z:
+                result[key] = z
         return result
     except Exception:
         return {}
@@ -80,8 +85,11 @@ def get_zone(pct):
 def classify_activity(act, quality_map: dict | None = None):
     """ใช้ session_type จาก quality log ก่อน (แม่นกว่า avg HR) แล้วค่อย fallback ไป HR"""
     act_date = act.get("startTimeLocal", "")[:10]
-    if quality_map and act_date in quality_map:
-        return quality_map[act_date]
+    if quality_map:
+        if act.get("activityId") in quality_map:
+            return quality_map[act["activityId"]]
+        if act_date in quality_map:
+            return quality_map[act_date]
     avg_hr = act.get("averageHR", 0) or 0
     rhr = ATHLETE["rhr"]
     hrr = ATHLETE["hrr"]

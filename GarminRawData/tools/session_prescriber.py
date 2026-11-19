@@ -36,7 +36,7 @@ sys.path.insert(0, str(COACH_MCP))
 
 from config import (ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS,  # noqa: E402
                     DAY_NUTRITION, render_prescription)
-from jd_rules import render_quality, render_long, fmt_pace  # noqa: E402
+from jd_rules import render_quality, render_long, long_m_finish, fmt_pace  # noqa: E402
 from readiness import (TAPER_PROFILES, taper_profile,  # noqa: E402,F401
                        active_races, active_taper, readiness_assess, post_race_recovery)
 from training_planner import week_plan  # noqa: E402
@@ -56,6 +56,28 @@ _ROUTINES = {"strength": ATHLETE.get("strength_routine") or "Strength ตาม�
 def _active_taper(on_date: date):
     """(name, days, profile) of the race whose tier window covers on_date."""
     return active_taper(on_date, RACE_DATES)
+
+
+# Where to run — athlete.json → training_venue (Nat 19 Nov 26: easy + E-only
+# long on the treadmill to hold HR ≤ E ceiling; quality + long with M outdoor).
+VENUE = {k: v for k, v in (ATHLETE.get("training_venue") or {}).items() if not k.startswith("_")}
+VENUE_ICON = {"treadmill": "🏠 ลู่ |", "outdoor": "🌳 outdoor |"}
+
+
+def _venue(s: dict) -> str | None:
+    if s.get("decision") == "REST" or s.get("type") in ("rest", "strength", "race"):
+        return None
+    sp_ = s.get("spec") or {}
+    t = sp_.get("type")
+    if t == "long":
+        key = "long_with_m" if sp_.get("m_finish_km") else "long_e_only"
+    elif t in ("easy", "E+strides"):
+        key = "easy"
+    elif t:
+        key = "quality"
+    else:
+        return None
+    return VENUE.get(key)
 
 
 def _get_health_from_cache() -> dict:
@@ -139,9 +161,7 @@ def prescribe_day(target_date: date, wi: dict | None = None, bb=None, hrv: str =
         if not spec:
             spec = {"type": "easy", "km": easy_km}
         r = render_quality(spec, weekly, VDOT_PACES, HR_ZONE_BOUNDS)
-        final = dict(spec)
-        if r["capped"] and spec.get("reps") and spec.get("type") != "combo":
-            final["reps"] = int(r["workout"].split("×")[0])
+        final = r["spec"]   # reps already cut to the JD cap (combo parts too)
         s.update(label=("🔥 Quality — " + r["type"]) if r["type"] not in ("easy",) else "🟢 Easy Run",
                  workout=r["workout"], note=r.get("note", ""), spec=final,
                  jd_notes=r["capped"], quality_km=r["quality_km"],
@@ -160,11 +180,21 @@ def prescribe_day(target_date: date, wi: dict | None = None, bb=None, hrv: str =
         km = wi["long_km"]
         if in_taper:
             km = min(km, tp["long_cap"])
-        s.update(label="📏 Long Run", workout=render_long(presc.get("long_spec", {}), km, VDOT_PACES, HR_ZONE_BOUNDS),
-                 spec={"type": "long", "km": km,
-                       "m_finish_km": (presc.get("long_spec") or {}).get("m_finish_km", 0)},
+        lspec = presc.get("long_spec") or {}
+        s.update(label="📏 Long Run",
+                 workout=render_long(lspec, km, VDOT_PACES, HR_ZONE_BOUNDS, weekly_km=weekly),
+                 spec={"type": "long", "km": km, "m_finish_km": long_m_finish(lspec, km, weekly)},
                  jd_notes=[wi["long_capped"]] if wi.get("long_capped") and not in_taper else [],
                  nutrition=DAY_NUTRITION["long"])
+
+    # REST (planned or readiness) never carries a runnable spec — the watch
+    # pusher must not build a workout for it (v1.8.1: REST on a quality day
+    # kept type "quality1" and the pusher uploaded T 3×10min).
+    if s["decision"] == "REST":
+        s["spec"] = None
+    s["venue"] = _venue(s)
+    if s["venue"]:
+        s["label"] = f"{VENUE_ICON[s['venue']]} {s['label']}"
 
     if in_taper and day_type not in ("rest", "strength"):
         race_wk = t_days <= tp["race_week"]

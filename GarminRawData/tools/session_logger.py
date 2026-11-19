@@ -112,6 +112,8 @@ def _insert_record(master: dict, record: dict) -> None:
 DISPLAY_TYPE = {            # master type → analyzer display type
     "threshold":   "Threshold (T)",
     "interval":    "Interval (I)",
+    "repetition":  "Repetition (R)",
+    "marathon_pace": "Marathon Pace",
     "tempo":       "Tempo",
     "fast_finish": "Fast Finish",
     "easy":        "Easy Run",
@@ -120,9 +122,9 @@ DISPLAY_TYPE = {            # master type → analyzer display type
 MASTER_TYPE = {             # analyzer display type → master type
     "Threshold (T)":  "threshold",
     "Interval (I)":   "interval",
-    "Repetition (R)": "interval",
+    "Repetition (R)": "repetition",      # v1.8.1: keep R distinct from I
     "Tempo":          "tempo",
-    "Marathon Pace":  "tempo",
+    "Marathon Pace":  "marathon_pace",   # was "tempo" → weekly report lost the M label
     "Fast Finish":    "fast_finish",
     "Easy Run":       "easy",
 }
@@ -330,7 +332,7 @@ def _auto_annotate_laps(laps: list, session_type: str, is_treadmill: bool = Fals
             role = "warmup"
         elif i == n - 1:
             role = "cooldown"
-        elif session_type in ("interval", "threshold"):
+        elif session_type in ("interval", "threshold", "repetition"):
             role = "quality" if i % 2 == 1 else "recovery"
         else:
             role = "quality"
@@ -584,10 +586,10 @@ def auto_log(activity_id: int, activity_data: dict, session_result: dict, date_s
     # Map post_session_analyzer type → session_logger type
     type_map = {
         "Easy Run":       "easy",
-        "Marathon Pace":  "tempo",
+        "Marathon Pace":  "marathon_pace",
         "Threshold (T)":  "threshold",
         "Interval (I)":   "interval",
-        "Repetition (R)": "interval",
+        "Repetition (R)": "repetition",
     }
     session_type = type_map.get(session_type_raw, "easy")
 

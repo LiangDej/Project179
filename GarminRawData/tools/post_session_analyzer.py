@@ -161,7 +161,9 @@ def print_cross_training(r: dict):
     print(f"⏱️  {r['duration_min']} min | ❤️  HR avg {r['avg_hr']} / max {r['max_hr']} (E ceiling {r['e_ceiling']})")
     if r["zone_pct"]:
         print("📊 Zones: " + "  ".join(f"{k.split()[0]} {v}%" for k, v in r["zone_pct"].items()))
-    print(f"📈 hrTSS {r['hr_tss']} (นับเข้า PMC/ACWR แล้ว) | Aerobic TE {r['aerobic_te']} | Anaerobic TE {r['anaerobic_te']}")
+    from activity_loader import CROSS_TYPES
+    counted = "นับเข้า PMC/ACWR แล้ว" if r["type"] in CROSS_TYPES else "ไม่นับเข้า PMC (strength/walk ฯลฯ)"
+    print(f"📈 hrTSS {r['hr_tss']} ({counted}) | Aerobic TE {r['aerobic_te']} | Anaerobic TE {r['anaerobic_te']}")
     print("ℹ️  ไม่วิเคราะห์ pace/cadence/form (ไม่ใช่การวิ่ง) และไม่บันทึกลง running session log")
     print("=" * 55)
 
@@ -288,7 +290,7 @@ def analyze(data):
     zone_counts = [0] * 5
     for h in hrs:
         for i, (_, lo, hi) in enumerate(ZONES):
-            if lo <= h < hi:
+            if lo <= h < hi or (i == len(ZONES) - 1 and h >= lo):   # ≥ MHR → Z5, not dropped
                 zone_counts[i] += 1
                 break
     total = len(hrs) or 1
@@ -423,17 +425,17 @@ def analyze(data):
 def analyze_easy_run(r):
     """Additional metrics for Easy Run sessions — aerobic discipline check."""
     z = r["zone_pct"]
-    z1_z2 = z[0] + z[1]
-    above_easy = z[2] + z[3] + z[4]
+    # v1.8.1: easy = JD E zone (Z1) ONLY. Z1+Z2 counted marathon-HR time as
+    # easy — a run at 170 bpm graded "A Truly aerobic" under the 154 ceiling.
+    z1_e = z[0]
+    above_easy = z[1] + z[2] + z[3] + z[4]
     avg_hr = r["avg_hr"]
-    e_ceiling = ZONES[1][2]  # top of Z2 (Marathon) = bottom of Z3
-
     hr_delta = avg_hr - ZONES[0][2]  # diff vs E ceiling (config)
 
-    if z1_z2 >= 90:
+    if z1_e >= EASY_GRADE_A_PCT and hr_delta <= 0:
         grade = "A ✅  — Easy run สมบูรณ์แบบ Truly aerobic"
-    elif z1_z2 >= 75:
-        grade = "B 🟡 — เกิน Z2 เล็กน้อย ลด Pace ลงอีก 15–20 วิ/km"
+    elif z1_e >= EASY_GRADE_B_PCT:
+        grade = f"B 🟡 — หลุดเหนือ E บางช่วง ลด Pace ให้ HR อยู่ใต้ {HR_ZONES[0][2]} bpm"
     else:
         grade = f"C ⚠️  — Easy run หนักเกินไป ลด HR ให้อยู่ใต้ {HR_ZONES[0][2]} bpm"
 
@@ -451,7 +453,7 @@ def analyze_easy_run(r):
         ae_comment = "N/A (ข้อมูลไม่พอคำนวณ drift)"
 
     return {
-        "z1_z2_pct": z1_z2,
+        "z1_e_pct": z1_e,
         "above_easy_pct": above_easy,
         "hr_trend": hr_trend,
         "aerobic_efficiency": ae_comment,
@@ -463,6 +465,7 @@ def analyze_easy_run(r):
 # Quality run grading
 # ---------------------------------------------------------------------------
 DC_GRADE_A, DC_GRADE_B = 8, 12   # decoupling % bands below Friel's 5 % "good"
+EASY_GRADE_A_PCT, EASY_GRADE_B_PCT = 90, 75   # % of easy-run time inside JD E
 
 
 def grade_session(r):
@@ -486,7 +489,7 @@ def grade_session(r):
 def flag_issues(r):
     flags = []
     if r["cadence"] and r["cadence"] < BASELINES["cadence_min"]:
-        flags.append(f"⚠️  Cadence ต่ำ ({r['cadence']} spm < {BASELINES['cadence_min']} เป้าหมาย) — ตรวจสอบ ACL Compensation")
+        flags.append(f"⚠️  Cadence ต่ำ ({r['cadence']} spm < {BASELINES['cadence_min']} เป้าหมาย) — ตรวจสอบ form/compensation")
 
     gct_threshold = BASELINES["gct_max"] + (BASELINES["gct_treadmill_add"] if r.get("is_treadmill") else 0)
     if r["gct"] and r["gct"] > gct_threshold:
@@ -884,8 +887,8 @@ def print_report(act_id, date_str, r):
         polar_low  = z_pcts[0] + z_pcts[1]    # Z1+Z2 (easy)
         polar_high = z_pcts[3] + z_pcts[4]    # Z4+Z5 (hard)
         polar_mid  = z_pcts[2]                # Z3 (threshold gray)
-        print(f"\n📊 GARMIN HR ZONE TIME")
-        z_labels = ["Z1(E)", "Z2(M)", "Z3(T)", "Z4(I)", "Z5(R)"]
+        print(f"\n📊 GARMIN WATCH ZONE TIME (โซนตั้งในนาฬิกา — ไม่ใช่ JD zones ด้านบน)")
+        z_labels = ["G-Z1", "G-Z2", "G-Z3", "G-Z4", "G-Z5"]
         for lbl, s_, p in zip(z_labels, zone_sec, z_pcts):
             mm, ss = divmod(int(s_), 60)
             bar = "█" * int(p / 3)
@@ -899,17 +902,17 @@ def print_report(act_id, date_str, r):
         ratio = r["power"] / r["avg_hr"]
         norm_p = r.get("garmin_norm_power")
         np_str = f" | NP/AP {norm_p/r['power']:.3f}" if norm_p and r["power"] else ""
-        # Reference: HM PB ธ.ค.25 = 1.76 W/bpm
-        ratio_icon = "🟢" if ratio >= 1.60 else ("🟡" if ratio >= 1.40 else "🔴")
+        good, ok, ref = (BASELINES.get("power_hr_good"), BASELINES.get("power_hr_ok"), BASELINES.get("power_hr_ref"))
+        ratio_icon = ("🟢" if ratio >= good else ("🟡" if ratio >= ok else "🔴")) if good and ok else "⚪"
         print(f"\n⚡ EFFICIENCY")
-        print(f"   Power/HR     : {ratio:.2f} W/bpm  {ratio_icon}  (HM PB ref: 1.76){np_str}")
+        print(f"   Power/HR     : {ratio:.2f} W/bpm  {ratio_icon}{f'  (ref: {ref})' if ref else ''}{np_str}")
 
     if is_easy:
         ea = analyze_easy_run(r)
         print(f"""
 {'─'*40}
 🟢 EASY RUN ANALYSIS
-   Z1+Z2 Combined : {ea['z1_z2_pct']}%  |  Above Easy: {ea['above_easy_pct']}%
+   E-zone (Z1)    : {ea['z1_e_pct']}%  |  Above E: {ea['above_easy_pct']}%
    HR vs E-ceiling: {ea['hr_trend']}
    Aerobic Drift  : {ea['aerobic_efficiency']}
    Aerobic Grade  : {ea['grade']}""")
@@ -986,6 +989,9 @@ def _prompt_treadmill_phases() -> list | None:
     """
     print("\n🏃 Treadmill Session — กรอก Phases (หรือ Enter เพื่อ skip)")
     print("   Format: speed1xkm1,speed2xkm2,...  เช่น  8.4x5,11.2x7,8.4x2")
+    if not sys.stdin.isatty():
+        print("   (non-interactive — skip; ใช้ --belt-kmh แทน)")
+        return None
     raw = input("   Phases: ").strip()
     if not raw:
         return None

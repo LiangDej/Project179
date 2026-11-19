@@ -319,7 +319,8 @@ def build_plan(race_key: str, temp_c: float, humidity_pct: float,
     print(f"📊 Verdict:")
     if replace_pct < 40:
         verdict = (f"🟡 {replace_pct}% — ต่ำกว่า 40% (gels เพียว Na ไม่พอ "
-                   f"แต่ HM สั้น ยอมรับได้ถ้าไม่ใช่ salty sweater)")
+                   + ("แต่ใช้เวลา ≤2 ชม. ยอมรับได้ถ้าไม่ใช่ salty sweater)" if duration_min <= 120
+                      else "และแข่งยาว >2 ชม. — เพิ่ม electrolyte)"))
     elif replace_pct > 80:
         verdict = (f"⚠️  {replace_pct}% — เกิน 80%: เสี่ยง GI distress + กระหายน้ำ "
                    f"(ไม่ใช่ hyponatremia — นั่นเกิดจากดื่มน้ำมากเกิน)")
@@ -356,7 +357,9 @@ def main():
     _require_products()
     parser = argparse.ArgumentParser(description="Race nutrition calculator")
     _rc = list(RACE_CONFIG.keys())
-    parser.add_argument("--race", default=(_rc[0] if _rc else None), choices=_rc)
+    from race_registry import active_race_key
+    _ak = active_race_key()
+    parser.add_argument("--race", default=(_ak if _ak in _rc else (_rc[0] if _rc else None)), choices=_rc)
     parser.add_argument("--temp",       type=float, default=27.0)
     parser.add_argument("--humidity",   type=float, default=82.0)
     parser.add_argument("--dew",        type=float, default=21.0)

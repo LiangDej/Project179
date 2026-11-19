@@ -3,7 +3,7 @@
 injury_risk_detector.py — Early Injury Risk Warning System
 
 วิเคราะห์ trend ของ biomechanical + training load signals ย้อนหลัง 14 วัน
-เพื่อตรวจจับความเสี่ยง ACL / Hamstring / Popliteus ล่วงหน้า
+เพื่อตรวจจับความเสี่ยงบาดเจ็บล่วงหน้า (จุดเฝ้าระวังส่วนตัว: athlete.json → injury_watch)
 
 Risk Signals:
   1. GCT (Ground Contact Time) เพิ่มขึ้น >5% trend → ขาล้าสะสม, form เสีย
@@ -34,7 +34,8 @@ COACH_MCP = BASE_DIR.parent / "skills" / "garmin_coach_mcp"
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(COACH_MCP))
 
-from config import BASELINES  # noqa: E402
+from config import ATHLETE, BASELINES  # noqa: E402
+INJURY_WATCH = ATHLETE.get("injury_watch") or []
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ def _check_gct_trend(quality_sessions: list[dict]) -> dict | None:
             "severity": severity,
             "detail":   f"GCT เพิ่มขึ้น {trend*100:.1f}% ต่อ session "
                         f"(last: {gct_vals[-1]:.0f}ms, baseline_max: {BASELINES['gct_max']}ms)",
-            "action":   "ลด intensity ลง 1 session, เช็ก form — เน้น Cadence 170+ spm",
+            "action":   f"ลด intensity ลง 1 session, เช็ก form — เน้น Cadence ≥ {BASELINES['cadence_min']} spm",
         }
     return None
 
@@ -176,7 +177,10 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
 
     # Cold start (<14 days history): chronic EWMA not converged → skip.
     try:
-        _, confidence, _ = pmc_confidence(activities)
+        # full load history — the 14-day slice made confidence LOW whenever
+        # day today-14 was a rest day, silently disabling ACWR (v1.8.1)
+        from activity_loader import load_load_activities
+        _, confidence, _ = pmc_confidence(load_load_activities())
         if confidence in ("NONE", "LOW"):
             return None
     except Exception:
@@ -188,7 +192,7 @@ def _check_atl_spike(activities: list[dict]) -> dict | None:
     if acwr <= ACWR_CAUTION:
         return None
 
-    severity = 3 if acwr > ACWR_DANGER else 2
+    severity = 2   # soft warning only (Impellizzeri 2020) — never CRITICAL by itself
     return {
         "signal":   "Acute:Chronic Workload Ratio สูง",
         "severity": severity,
@@ -270,11 +274,11 @@ def analyze(lookback_days: int) -> dict:
     for r in risks:
         sig = r["signal"]
         if "GCT" in sig or "Cadence" in sig:
-            injury_sites.append("⚠️  Popliteus / Hamstring (form-related)")
-        if "ATL" in sig or "Streak" in sig:
-            injury_sites.append("⚠️  Shin / IT Band (overuse)")
+            injury_sites.append("⚠️  Form-related" + (f" — เฝ้าระวัง: {', '.join(INJURY_WATCH)}" if INJURY_WATCH else ""))
+        if "Workload" in sig or "Streak" in sig:
+            injury_sites.append("⚠️  Overuse (shin / IT band / Achilles)")
         if "Decoupling" in sig:
-            injury_sites.append("⚠️  General fatigue — ACL risk ถ้า form เสีย")
+            injury_sites.append("⚠️  General fatigue — form เสียง่าย" + (f" ({INJURY_WATCH[0]})" if INJURY_WATCH else ""))
 
     return {
         "analysis_date":    date.today().isoformat(),

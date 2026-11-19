@@ -3,6 +3,8 @@
 # ต่างจาก run_post_easy.sh ตรงที่ใช้ --update-log เพื่อบันทึกผลวิเคราะห์ (grade) ลง sessions_master.json
 # ทำให้ energy_efficiency_scorer.py เห็น stamina_drain_pct ของ Long Run
 
+set -euo pipefail
+
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$TOOLS_DIR"
 
@@ -10,6 +12,12 @@ echo ""
 echo "════════════════════════════════════════"
 echo "🟡 POST LONG RUN — $(date '+%Y-%m-%d %H:%M')"
 echo "════════════════════════════════════════"
+
+# ── Step 0: Sync latest activities + wellness (same as easy/quality) ───────
+echo ""
+echo "▶ Step 0 — Sync Activities + Wellness"
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_incremental.py" --lookback-days 3
+"$(bash "$TOOLS_DIR/get_python.sh")" "$TOOLS_DIR/../fetch_wellness.py"
 
 # ── Step 1: Analyze + log to sessions_master.json ──────────────────────────
 echo ""

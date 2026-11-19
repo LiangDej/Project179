@@ -1,5 +1,5 @@
 """
-sleep_correlator.py — Correlate sleep score → next-day HR drift + performance
+sleep_correlator.py — Correlate sleep score → same-morning run HR drift + performance
 Reads wellness/ + running_activities_all.json
 
 Usage:
@@ -50,12 +50,10 @@ def backfill_health_cache(days: int = 90):
         if d >= cutoff and a.get("distance", 0) > 3000:
             run_dates.add(d_str)
 
-    # Need health data for the night BEFORE each run
-    dates_to_fetch = sorted(
-        str(date.fromisoformat(d) - timedelta(days=1))
-        for d in run_dates
-        if date.fromisoformat(d) - timedelta(days=1) >= cutoff
-    )
+    # Garmin files the night's sleep/HRV under the date it ENDS (wellness_D
+    # = the sleep before day D's morning run) — so fetch the run dates
+    # themselves (v1.8.1: was D-1 → paired Monday-night sleep with Wednesday)
+    dates_to_fetch = sorted(d for d in run_dates if date.fromisoformat(d) >= cutoff)
 
     print(f"🔄 Backfill health cache — {len(dates_to_fetch)} dates to check ({days}d window)")
     client = get_client()
@@ -132,9 +130,9 @@ def correlate(days: int = 90, show_insight: bool = False):
         if sleep is None:
             continue
 
-        # Next-day runs
-        next_d = str(date.fromisoformat(d_str) + timedelta(days=1))
-        next_acts = [a for a in act_by_date.get(next_d, [])
+        # Runs the morning after that sleep = same calendar date as the
+        # wellness file (sleep ending that morning)
+        next_acts = [a for a in act_by_date.get(d_str, [])
                      if a.get("averageHR", 0) > 100 and a.get("distance", 0) > 3000]
         if not next_acts:
             continue
@@ -160,7 +158,7 @@ def correlate(days: int = 90, show_insight: bool = False):
             "bb_high":     bb_high,
             "hrv":         hrv,
             "rhr":         rhr,
-            "run_date":    next_d,
+            "run_date":    d_str,
             "run_hr":      round(avg_hr, 1),
             "run_dist":    round(avg_dist, 1),
             "run_pace":    round(avg_pace, 2) if avg_pace else None,
@@ -180,11 +178,11 @@ def correlate(days: int = 90, show_insight: bool = False):
         return round(sum(vals) / len(vals), 1) if vals else None
 
     print("=" * 60)
-    print(f"💤 SLEEP → NEXT-DAY PERFORMANCE CORRELATOR")
+    print(f"💤 SLEEP → MORNING-RUN PERFORMANCE CORRELATOR")
     print(f"   {len(rows)} data points | {days} day window")
     print("=" * 60)
     print()
-    print(f"{'Sleep Quality':<18} {'n':>4} {'Avg Sleep':>10} {'Next-day HR':>12} {'Avg Pace':>10}")
+    print(f"{'Sleep Quality':<18} {'n':>4} {'Avg Sleep':>10} {'Run HR     ':>12} {'Avg Pace':>10}")
     print("-" * 58)
     for label, bucket in [("🔴 Poor (<60)", poor), ("🟡 OK (60–79)", ok), ("🟢 Good (≥80)", good)]:
         if not bucket:
@@ -209,7 +207,7 @@ def correlate(days: int = 90, show_insight: bool = False):
         r = round(num/den, 3) if den > 0 else 0
         direction = "↓ HR ต่ำลงเมื่อนอนดีขึ้น ✅" if r < -0.2 else \
                     "↑ ความสัมพันธ์อ่อน" if abs(r) < 0.2 else "↑ HR สูงขึ้นเมื่อนอนดีขึ้น (?)"
-        print(f"📊 Correlation (sleep ↔ next-day HR): r = {r}  {direction}")
+        print(f"📊 Correlation (sleep ↔ run HR next morning): r = {r}  {direction}")
         print()
 
     # HRV analysis
@@ -217,8 +215,8 @@ def correlate(days: int = 90, show_insight: bool = False):
     unbalanced_hr = avg([r for r in rows if r["hrv"] in ("LOW", "POOR", "UNBALANCED")], "run_hr")
     if balanced_hr and unbalanced_hr:
         diff = round(unbalanced_hr - balanced_hr, 1)
-        print(f"💓 HRV BALANCED next-day HR  : {balanced_hr} bpm")
-        print(f"   HRV UNBALANCED next-day HR: {unbalanced_hr} bpm  (diff: +{diff} bpm)")
+        print(f"💓 HRV BALANCED → run HR    : {balanced_hr} bpm")
+        print(f"   HRV UNBALANCED → run HR  : {unbalanced_hr} bpm  (diff: +{diff} bpm)")
         print()
 
     if show_insight:

@@ -49,13 +49,14 @@ def _build_races() -> dict:
         for k, r in load_races().items():
             if not r.get("active", True):
                 continue
-            stations = r.get("stations_km") or []
-            aid = round(r["dist_km"] / len(stations), 1) if stations else 5.0
+            stations = sorted(float(x) for x in (r.get("stations_km") or []) if 0 < float(x) < r["dist_km"])
+            aid = round(r["dist_km"] / (len(stations) + 1), 1) if stations else 5.0
             out[k] = {
                 "name":             f"{r['name']} ({r['dist_km']:.0f}km)",
                 "distance_km":      r["dist_km"],
                 "date":             date.fromisoformat(r["date"]),
                 "aid_every_km":     aid,
+                "stations_km":      stations,
                 "terrain":          r.get("terrain", "flat"),
                 "default_goal_min": r.get("goal_min"),
                 "expected_temp_c":  r.get("expected_temp_c", 27),
@@ -151,17 +152,23 @@ def _build_segments(race: dict, goal_min: float, vdot: float,
     aid_step = race["aid_every_km"]
     base_pace_sec = goal_min * 60 / dist_km
 
-    # Segment boundaries at aid stations
-    boundaries = []
-    km = 0.0
-    while km < dist_km:
-        km = min(km + aid_step, dist_km)
-        boundaries.append(round(km, 2))
-    if boundaries[-1] < dist_km:
-        boundaries.append(dist_km)
+    # Segment boundaries at the real aid stations (races.json stations_km);
+    # even spacing only when none are listed (v1.8.1: ATM [6,12,18] came out
+    # as 7/14/21 because dist/len(stations) was used)
+    if race.get("stations_km"):
+        boundaries = [round(k, 2) for k in race["stations_km"]] + [dist_km]
+    else:
+        boundaries = []
+        km = 0.0
+        while km < dist_km:
+            km = min(km + aid_step, dist_km)
+            boundaries.append(round(km, 2))
+        if boundaries[-1] < dist_km:
+            boundaries.append(dist_km)
 
     segments = []
     prev_km = 0.0
+    hr_plan = race_hr_plan(dist_km)
 
     for seg_end in boundaries:
         seg_start = prev_km
@@ -192,7 +199,8 @@ def _build_segments(race: dict, goal_min: float, vdot: float,
         # Grade adjustment
         pace_adj = grade_pct * GRADE_FACTOR if grade_pct > 0 else grade_pct * DOWNHILL_FACTOR
 
-        # Conservative start strategy
+        # Conservative start strategy (made zero-mean below so the plan
+        # still adds up to the goal time — v1.8.1: a flat 4:00 projected 4:01)
         if seg_frac < 0.25:
             conserve_adj = 8
         elif seg_frac < 0.50:
@@ -204,12 +212,9 @@ def _build_segments(race: dict, goal_min: float, vdot: float,
 
         target_pace = base_pace_sec + pace_adj + conserve_adj
 
-        # HR estimate
-        rhr     = ATHLETE["rhr"]
-        mhr     = ATHLETE["mhr"]
-        base_hr = rhr + (mhr - rhr) * 0.82
-        hr_drift = (mhr - base_hr) * seg_frac * 0.7
-        target_hr = round(base_hr + hr_drift)
+        # HR guide = the same zone plan as hr_strategy (race_hr_plan), rising
+        # with distance (v1.8.1: a %HRR drift formula reached Z4 on a marathon)
+        target_hr = round(hr_plan["lo"] + (hr_plan["hi"] - hr_plan["lo"]) * seg_frac)
 
         segments.append({
             "segment":         f"km {seg_start:.1f}–{seg_end:.1f}",
@@ -223,6 +228,14 @@ def _build_segments(race: dict, goal_min: float, vdot: float,
             "cumulative_km":   round(seg_end, 2),
         })
         prev_km = seg_end
+
+    # zero-mean the start/finish strategy over distance → total = goal (flat course)
+    if segments and not elevation_points:
+        tot = sum(s["target_pace_sec"] * s["distance_km"] for s in segments)
+        shift = (tot - goal_min * 60) / dist_km
+        for s in segments:
+            s["target_pace_sec"] = round(s["target_pace_sec"] - shift)
+            s["target_pace"] = _fmt_pace(s["target_pace_sec"])
 
     return segments
 
@@ -324,7 +337,9 @@ def print_plan(p: dict):
 
 def main():
     parser = argparse.ArgumentParser(description="Race Pace Planner")
-    _default_race = list(RACES.keys())[0]  # RACES is already filtered to active races only
+    from race_registry import active_race_key
+    _ak = active_race_key()
+    _default_race = _ak if _ak in RACES else next(iter(RACES), None)   # active A-race, not the first key
     parser.add_argument("--race",      choices=list(RACES.keys()), default=_default_race)
     parser.add_argument("--goal",      type=float, default=None,
                         help="Goal time in minutes (e.g. 110 for 1:50)")

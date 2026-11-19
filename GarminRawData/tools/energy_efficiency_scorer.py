@@ -145,6 +145,8 @@ def analyze(max_sessions: int) -> dict:
         bb_end   = s.get("bb_end")
         if bb_start is not None and bb_end is not None:
             bb_high, bb_low = bb_start, bb_end
+        elif s.get("bb_source") == "unavailable":
+            bb_high = bb_low = None   # v1.7.1: never substitute the whole-day BB
         else:
             bb_high, bb_low = _get_bb_for_date(date_str)
         bb_drop = (bb_high - bb_low) if (bb_high is not None and bb_low is not None) else None

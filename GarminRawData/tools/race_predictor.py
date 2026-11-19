@@ -249,7 +249,8 @@ def estimate_current_vdot(sessions: list, n_recent: int = 5) -> tuple:
         aid = s.get("activity_id")
         q_hr = quality_hr_idx.get(aid) if aid else None
         # Warn if quality_hr_avg missing → fallback to full-session avg_hr (includes WU/CD)
-        if q_hr is None and s.get("avg_hr"):
+        # interval sessions are estimated from pace, not HR → no HR warning
+        if q_hr is None and s.get("avg_hr") and "interval" not in (s.get("session_type") or "").lower():
             missing_hr_warn.append(f"  ⚠️  {s['date']} [{aid}]: quality_hr_avg ไม่อยู่ใน sessions_master "
                                    f"→ ใช้ avg_hr={s['avg_hr']} แทน (รวม WU/CD — อาจ overestimate)")
         v = estimate_vdot_from_session(s, quality_hr_avg=q_hr)
@@ -529,7 +530,7 @@ def _run(args) -> dict:
     print(f"\n  ─────────────────────────────────────────────────────────")
     print(f"  ⚠️  DISCLAIMER (Jack Daniels Protocol)")
     print(f"     ตัวเลขข้างต้นคือ 'training-based estimate' เท่านั้น")
-    print(f"     ห้ามใช้อัพเดต VDOT ใน config.py หรือ skill file")
+    print(f"     ห้ามใช้อัพเดต VDOT ใน athlete.json (อัปจากผลแข่ง/TT เท่านั้น)")
     print(f"     VDOT จะอัพเดตได้เมื่อมีผลแข่งจริงเท่านั้น")
     print(f"{'='*60}\n")
     return result

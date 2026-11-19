@@ -287,7 +287,7 @@ def build_threshold(name, reps, rep_min, t_slow, t_fast, rec_sec=120, skip_warmu
         recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {JOG_NOTE}"),
     ])
     steps.append(rgroup)
-    order += 1
+    order += 3   # group + its 2 children each take a stepOrder (v1.8.1 collision fix)
     steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {JOG_NOTE}"))
     est = (0 if skip_warmup else 1020) + reps * (rep_sec + rec_sec) + 600
     return wrap_workout(name, steps, est)
@@ -314,7 +314,7 @@ def build_interval(name, reps, rep_dist_m, i_slow, i_fast, rec_sec=180, skip_war
         recovery_step(order + 2, 1, rec_sec, desc=f"Jog recovery {rec_sec//60}min — {JOG_NOTE}"),
     ])
     steps.append(rgroup)
-    order += 1
+    order += 3   # group + its 2 children each take a stepOrder (v1.8.1 collision fix)
     steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {JOG_NOTE}"))
     est = (0 if skip_warmup else 1020) + reps * (int(rep_dist_m / pace_to_ms(i_fast)) + rec_sec) + 600
     return wrap_workout(name, steps, est)
@@ -338,16 +338,21 @@ def build_easy_strides(name, easy_km, pace_slow, pace_fast, n_strides=6):
     return wrap_workout(name, steps, est)
 
 
-def build_long(name, dist_km, pace_slow, pace_fast):
-    """WU 5min → Long dist_km → CD 5min"""
-    steps = [
-        warmup_step(1, 300, f"Warm up easy 5min — {JOG_NOTE}"),
-        active_dist_step(2, dist_km * 1000,
-                         desc=f"Long run {dist_km}km @ {pace_slow}–{pace_fast} | {tm_note(pace_slow, pace_fast)}",
-                         pace_slow=pace_slow, pace_fast=pace_fast),
-        cooldown_step(3, 300, f"Cool down easy 5min — {JOG_NOTE}"),
-    ]
-    est = 300 + int(dist_km * 1000 / pace_to_ms(pace_fast)) + 300
+def build_long(name, dist_km, pace_slow, pace_fast, m_finish_km: float = 0):
+    """WU 5min → Long E (dist − M finish) → [M-pace finish] → CD 5min"""
+    e_km = dist_km - (m_finish_km or 0)
+    steps = [warmup_step(1, 300, f"Warm up easy 5min — {JOG_NOTE}"),
+             active_dist_step(2, e_km * 1000,
+                              desc=f"Long run E {e_km:g}km @ {pace_slow}–{pace_fast} | {tm_note(pace_slow, pace_fast)}",
+                              pace_slow=pace_slow, pace_fast=pace_fast)]
+    est = 300 + int(e_km * 1000 / pace_to_ms(pace_fast)) + 300
+    if m_finish_km:
+        m_slow, m_fast = PACE["M"]
+        steps.append(active_dist_step(3, m_finish_km * 1000,
+                                      desc=f"M-pace finish {m_finish_km:g}km @ {m_fast}–{m_slow} | {tm_note(m_slow, m_fast)}",
+                                      pace_slow=m_slow, pace_fast=m_fast))
+        est += int(m_finish_km * 1000 / pace_to_ms(m_fast))
+    steps.append(cooldown_step(len(steps) + 1, 300, f"Cool down easy 5min — {JOG_NOTE}"))
     return wrap_workout(name, steps, est)
 
 
@@ -374,7 +379,7 @@ def build_from_spec(name: str, spec: dict, skip_warmup: bool = False):
     """Quality workout from a session `spec` (T/I/R/M or combo parts) — the
     exact reps the planner settled on after JD caps; no text parsing."""
     parts = spec.get("parts") or [spec]
-    order, steps, est = 1, [], 0
+    order, steps, est, group_id = 1, [], 0, 0
     if not skip_warmup:
         steps.append(warmup_step(order, 900, f"Warm up easy 15min — {JOG_NOTE}")); order += 1
         steps.append(active_time_step(order, 120, f"2×stride to wake up legs — {STRIDE_NOTE}")); order += 1
@@ -391,18 +396,21 @@ def build_from_spec(name: str, spec: dict, skip_warmup: bool = False):
             dist = int((part.get("rep_km") or part.get("km") or 0) * 1000 or part.get("rep_m", 0))
             body = dict(dist_m=dist); lab = f"{dist}m"
             work = int(dist / pace_to_ms(fast))
-        main = interval_step(order + 1, 1, desc=f"{kind}-pace {lab} @ {fast}–{slow} | {tm_note(slow, fast)}",
+        group_id += 1
+        main = interval_step(order + 1, group_id, desc=f"{kind}-pace {lab} @ {fast}–{slow} | {tm_note(slow, fast)}",
                              pace_slow=slow, pace_fast=fast, **body)
         if reps > 1:
             steps.append(repeat_group(order, reps, [
-                main, recovery_step(order + 2, 1, rec, desc=f"Jog recovery {rec}s — {JOG_NOTE}")]))
+                main, recovery_step(order + 2, group_id, rec, desc=f"Jog recovery {rec}s — {JOG_NOTE}")],
+                child_id=group_id))
             est += reps * (work + rec)
+            order += 3   # group + 2 children (unique stepOrder / childStepId per group)
         else:
             main["stepOrder"] = order
             main["childStepId"] = None
             steps.append(main)
             est += work
-        order += 1
+            order += 1
     steps.append(cooldown_step(order, 600, f"Cool down easy 10min — {JOG_NOTE}"))
     return wrap_workout(name, steps, est + 600)
 
@@ -422,6 +430,11 @@ def session_to_workout(session: dict, skip_warmup: bool = False) -> dict | None:
     t_slow, t_fast = PACE["T"]
     i_slow, i_fast = PACE["I"]
 
+    # REST / RACE never become a watch workout (v1.8.1: a readiness REST on a
+    # quality day fell through to the text parser and built T 3×10min).
+    if session.get("decision") in ("REST", "RACE") or stype in ("rest", "strength", "race"):
+        return None
+
     # v1.8: sessions carry the final structured spec — use it, no regex.
     spec = session.get("spec")
     if spec:
@@ -432,7 +445,8 @@ def session_to_workout(session: dict, skip_warmup: bool = False) -> dict | None:
             return build_easy_strides(f"Easy+Strides — {weekday} {date_s}", spec["km"], e_slow, e_fast,
                                       n_strides=spec.get("strides", 6))
         if st == "long":
-            return build_long(f"Long Run {spec['km']:g}km — {weekday} {date_s}", spec["km"], e_slow, e_fast)
+            return build_long(f"Long Run {spec['km']:g}km — {weekday} {date_s}", spec["km"], e_slow, e_fast,
+                              m_finish_km=spec.get("m_finish_km") or 0)
         if st in ("T", "I", "R", "M", "combo"):
             return build_from_spec(f"Quality {st} — {weekday} {date_s}", spec, skip_warmup)
 
@@ -521,7 +535,7 @@ def main():
         print(f"   → avg HR min 10–30 = LT2 (TM conditions)")
         print(f"{'='*60}")
         if args.upload:
-            date_str = input("Schedule date (YYYY-MM-DD, Enter to skip): ").strip()
+            date_str = input("Schedule date (YYYY-MM-DD, Enter to skip): ").strip() if sys.stdin.isatty() else ""
             c = get_client()
             result = c.upload_running_workout(tt)
             wid = result.get("workoutId")
@@ -569,7 +583,7 @@ def main():
         date_s  = session.get("date")
         weekday = session.get("weekday")
 
-        if stype in ("strength", "rest"):
+        if stype in ("strength", "rest") or session.get("decision") in ("REST", "RACE"):
             icon = "🏋️" if stype == "strength" else "🛌"
             print(f"\n  {date_s} {weekday} — {icon} {session['label']} (ไม่ upload)")
             continue
@@ -592,6 +606,9 @@ def main():
         return
 
     if not args.yes:
+        if not sys.stdin.isatty():
+            print("❌ non-interactive run: pass --yes to upload (refusing to hang on a prompt)")
+            return
         ans = input(f"\nUpload {len(to_upload)} workouts to Garmin Connect? [Y/n]: ").strip().lower()
         if ans not in ("", "y", "yes"):
             print("Cancelled.")
@@ -650,7 +667,7 @@ def push_weekly_plan_to_garmin(client, plan: dict, skip_warmup: bool = False) ->
         date_s = session.get("date")
         weekday = session.get("weekday")
         
-        if stype in ("strength", "rest"):
+        if stype in ("strength", "rest") or session.get("decision") in ("REST", "RACE"):
             results["rest_days"].append(f"{date_s} ({weekday}) - {session.get('label')}")
             continue
             

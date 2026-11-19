@@ -42,7 +42,9 @@ T_HR_LO     = HR_ZONE_BOUNDS["Z3_T"][0]   # Threshold zone low (config)
 LONG_RUN_KM = 14.0                         # ≥ this km = long run candidate
 QUALITY_ZONE_MIN = 10.0                    # ≥ 10 min in Z3+Z4+Z5 = quality effort
 
-QUALITY_TYPES = {"Threshold (T)", "Interval (I)", "Repetition (R)", "Tempo", "Fast Finish"}
+# sessions_master stores canonical lowercase keys (session_logger.MASTER_TYPE);
+# compare on those — the display strings never matched (Rule 1 was dead, v1.8.1).
+QUALITY_TYPES = {"threshold", "interval", "repetition", "tempo", "marathon_pace", "fast_finish"}
 
 
 def _hr_pct(avg_hr: float) -> float:
@@ -56,10 +58,11 @@ def _load_master_types() -> dict:
     try:
         with open(MASTER_JSON, encoding="utf-8") as f:
             master = json.load(f)
+        from session_logger import DISPLAY_TYPE
         return {
-            str(s["activity_id"]): s.get("session_type", "")
+            str(s["activity_id"]): DISPLAY_TYPE.get(s["session_type"], s["session_type"])
             for s in master.get("sessions", [])
-            if s.get("activity_id") and s.get("session_type") in QUALITY_TYPES
+            if s.get("activity_id") and (s.get("session_type") or "").lower() in QUALITY_TYPES
         }
     except Exception:
         return {}

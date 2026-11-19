@@ -29,6 +29,12 @@ else
   echo "  ❌ Test suite FAILED — fix before pushing"
   FAIL=1
 fi
+if (cd GarminRawData/tools && "$(bash "$TOOLS_DIR/get_python.sh")" -m unittest tests.test_tools >/dev/null 2>&1); then
+  echo "  ✅ Unit tests passed"
+else
+  echo "  ❌ Unit tests FAILED (cd GarminRawData/tools && python -m unittest tests.test_tools)"
+  FAIL=1
+fi
 
 # ── 2. Sensitive files must never be tracked ────────────────────────────────
 # Add new personal/secret paths here as the project grows — this list is the
@@ -36,6 +42,10 @@ fi
 SENSITIVE_PATHS=(
   "GarminRawData/athlete.json"
   "GarminRawData/races.json"
+  "GarminRawData/training_plan.json"
+  "GarminRawData/cross_training_all.json"
+  "GarminRawData/wellness_partner"
+  "GarminRawData/session_table.md"
   "GarminRawData/wellness"
   "GarminRawData/lab_envs.py"
   "GarminRawData/deploy_vm.py"
@@ -60,7 +70,7 @@ done
 # Also catch anything currently staged (added/modified — NOT deleted; a
 # staged deletion is how we fix a past leak, not a new one) that matches
 # known secret patterns, even if not yet committed.
-STAGED_HITS="$(git diff --cached --name-status | grep -v '^D' | cut -f2- | grep -E 'lab_envs\.py|deploy_vm\.py|athlete\.json|races\.json|\.env$|wellness/|VME-Training-Lab-Runbook\.md|PalatinoseLab/|investment-coach\.md' || true)"
+STAGED_HITS="$(git diff --cached --name-status | grep -v '^D' | cut -f2- | grep -E 'lab_envs\.py|deploy_vm\.py|athlete\.json|races\.json|training_plan\.json|cross_training_all\.json|session_table\.md|\.env$|wellness/|wellness_partner/|VME-Training-Lab-Runbook\.md|PalatinoseLab/|investment-coach\.md' || true)"
 if [ -n "$STAGED_HITS" ]; then
   echo "  ❌ STAGED (about to be committed) — sensitive files:"
   echo "$STAGED_HITS" | sed 's/^/       /'

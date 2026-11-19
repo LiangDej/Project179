@@ -13,6 +13,7 @@ keeps a short maintenance T session until T-5; only the last 4 days are easy.
 """
 from __future__ import annotations
 
+import math
 from datetime import date
 
 RHR_WARN_DELTA = 5    # bpm above baseline → no quality/long today
@@ -21,6 +22,7 @@ BB_REST = 20
 BB_LOW = 40
 BB_QUALITY_OK = 60
 BB_STRENGTH_MIN = 30
+STRENGTH_RECOVERY_FRACTION = 1 / 3   # first third of the JD window: mobility only (coach rule)
 EASY_CAP_KM = 8       # default distance cap when a hard day is downgraded
 SHORT_CAP_KM = 6
 
@@ -53,8 +55,10 @@ def active_races(active_only: bool = True) -> list[dict]:
         from race_registry import list_races
         return [{"name": r["name"], "date": date.fromisoformat(r["date"]),
                  "tier": r.get("tier", "A"), "taper_days": r.get("taper_days"),
-                 "dist_km": float(r.get("dist_km") or 0)}
-                for _, r in list_races(active_only=active_only) if r.get("tier") != "template"]
+                 "dist_km": float(r.get("dist_km") or 0),
+                 "active": r.get("active", True), "recovery": r.get("recovery", True)}
+                for _, r in list_races(active_only=active_only)
+                if r.get("tier") not in ("template", "archived")]
     except Exception:
         return []
 
@@ -66,10 +70,16 @@ JD_RECOVERY_KM_PER_DAY = 3.0
 
 def post_race_recovery(on_date: date, races: list[dict] | None = None):
     """(race name, days since, recovery days) if on_date is inside the JD
-    post-race easy window, else None."""
-    import math
+    post-race easy window, else None.
+
+    Only races that were actually RACED count: archived/template races are
+    excluded upstream (v1.8.1 — archived Fuji 13 Dec locked out 14–28 Dec),
+    races with active=false are skipped, and races.json → "recovery": false
+    marks a race run as training (pacer duty, C-race at easy effort, DNS)."""
     best = None
     for r in (active_races(active_only=False) if races is None else races):
+        if r.get("active") is False or r.get("recovery") is False or r.get("tier") in ("archived", "template"):
+            continue
         since = (on_date - r["date"]).days
         need = math.ceil((r.get("dist_km") or 0) / JD_RECOVERY_KM_PER_DAY)
         if 1 <= since <= need and (best is None or since < best[1]):
@@ -113,9 +123,22 @@ def readiness_assess(bb, hrv_status, day_type, pain="none", taper_days=None,
         return {"decision": "REST", "reason": "🛌 วันพักตามตาราง ห้ามซ้อมเด็ดขาด",
                 "cap_km": 0, "others": []}
     if day_type == "strength":
-        if not planning and bb is not None and bb < BB_STRENGTH_MIN:
-            return {"decision": "MODIFY", "reason": "🟡 BB ต่ำมาก — ลด Weight Training เหลือ Mobility เท่านั้น",
-                    "cap_km": None, "others": []}
+        # v1.8.1: strength used to check BB only — day 1 after a marathon, a
+        # moderate knee, HRV crash or RHR +8 all still said "GO squat".
+        why = []
+        if pain == "moderate":
+            why.append("🟡 เจ็บระดับ moderate — Mobility เท่านั้น")
+        if recovery and recovery[1] <= math.ceil(recovery[2] * STRENGTH_RECOVERY_FRACTION):
+            why.append(f"🟡 ฟื้นหลังแข่ง {recovery[0]} วันที่ {recovery[1]} — Mobility เท่านั้น")
+        if not planning:
+            if bb is not None and bb < BB_STRENGTH_MIN:
+                why.append("🟡 BB ต่ำมาก — ลด Weight Training เหลือ Mobility เท่านั้น")
+            if (hrv_status or "").lower() == "unbalanced":
+                why.append("🟡 HRV เมื่อคืนต่ำกว่าช่วงปกติ — Mobility เท่านั้น")
+            if rhr and rhr_baseline and rhr - rhr_baseline >= RHR_HIGH_DELTA:
+                why.append(f"🟡 RHR +{rhr - rhr_baseline:g} — อาจป่วย: Mobility เท่านั้น")
+        if why:
+            return {"decision": "MODIFY", "reason": why[0], "cap_km": None, "others": why[1:]}
         return {"decision": "GO", "reason": "✅ ทำ Strength ตามแผน", "cap_km": None, "others": []}
 
     is_q = day_type in ("quality1", "quality2")
@@ -156,8 +179,11 @@ def readiness_assess(bb, hrv_status, day_type, pain="none", taper_days=None,
                 votes.append(("REST", 0, "🔴 BB ต่ำมาก — พักผ่อน อย่าฝืน"))
             elif bb < BB_LOW:
                 votes.append(("MODIFY", SHORT_CAP_KM, "🟡 BB ต่ำ — Easy สั้นเท่านั้น"))
-            elif (bb < BB_QUALITY_OK or hrv != "balanced") and is_q:
+            elif (bb < BB_QUALITY_OK or hrv in ("unbalanced", "high")) and is_q:
                 votes.append(("MODIFY", EASY_CAP_KM, "🟡 BB ปานกลาง/HRV ไม่ balanced — ลด Quality → Easy Run แทน"))
+        if hrv in ("unknown", "") and is_q:
+            # no HRV (watch off / API) is not evidence of fatigue — caution only
+            votes.append(("CAUTION", None, "⚠️ ไม่มีค่า HRV เมื่อคืน — ใช้ BB/RHR/ความรู้สึกประกอบ"))
 
     rank = {"REST": 3, "MODIFY": 2, "CAUTION": 1}
     if votes:

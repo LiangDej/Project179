@@ -338,21 +338,27 @@ class TestAnalyzeEasyRun(unittest.TestCase):
             "decoupling": decoupling,
         }
 
-    def test_grade_a_when_90pct_easy_zones(self):
-        """90%+ ใน Z1+Z2 = Grade A"""
-        r = self._make_result(z1_pct=60, z2_pct=35, z3_pct=5, avg_hr=148)
+    def test_grade_a_when_90pct_in_e_zone(self):
+        """v1.8.1: 90 %+ in JD E (Z1 only) and avg HR ≤ E ceiling = Grade A"""
+        r = self._make_result(z1_pct=95, z2_pct=5, z3_pct=0, avg_hr=148)
         result = analyze_easy_run(r)
         self.assertIn("A", result["grade"])
 
-    def test_grade_b_when_75_to_90pct_easy_zones(self):
-        """75–90% ใน Z1+Z2 = Grade B"""
-        r = self._make_result(z1_pct=50, z2_pct=28, z3_pct=22, avg_hr=158)
+    def test_grade_b_when_75_to_90pct_in_e_zone(self):
+        """75–90 % in Z1 = Grade B"""
+        r = self._make_result(z1_pct=80, z2_pct=20, z3_pct=0, avg_hr=152)
         result = analyze_easy_run(r)
         self.assertIn("B", result["grade"])
 
-    def test_grade_c_when_below_75pct_easy_zones(self):
-        """<75% ใน Z1+Z2 = Grade C"""
+    def test_grade_c_when_below_75pct_in_e_zone(self):
+        """<75 % in Z1 = Grade C"""
         r = self._make_result(z1_pct=40, z2_pct=30, z3_pct=30, avg_hr=165)
+        result = analyze_easy_run(r)
+        self.assertIn("C", result["grade"])
+
+    def test_marathon_hr_easy_run_is_not_grade_a(self):
+        """v1.8.1 regression: 100 % Z2 (marathon HR) used to grade A via Z1+Z2"""
+        r = self._make_result(z1_pct=0, z2_pct=100, z3_pct=0, avg_hr=170)
         result = analyze_easy_run(r)
         self.assertIn("C", result["grade"])
 
@@ -372,7 +378,7 @@ class TestAnalyzeEasyRun(unittest.TestCase):
         """ต้อง return dict ที่มี keys ครบ"""
         r = self._make_result(z1_pct=70, z2_pct=20, z3_pct=10, avg_hr=150)
         result = analyze_easy_run(r)
-        for key in ["z1_z2_pct", "above_easy_pct", "hr_trend", "aerobic_efficiency", "grade"]:
+        for key in ["z1_e_pct", "above_easy_pct", "hr_trend", "aerobic_efficiency", "grade"]:
             self.assertIn(key, result)
 
 

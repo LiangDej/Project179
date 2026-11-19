@@ -103,7 +103,10 @@
     "power_min": null,
     "power_max": null,
     "grade_cadence_s": 155,
-    "grade_cadence_a": 153
+    "grade_cadence_a": 153,
+    "power_hr_ref": null,
+    "power_hr_good": null,
+    "power_hr_ok": null
   },
   "lt2_test": {
     "_comment": "Treadmill [avg_hr, pace_sec_per_km] points from your own LTHR/LT2 test — used to estimate treadmill pace from HR. Empty = feature off.",
@@ -120,5 +123,13 @@
     "carb_load": "Extra carbs at dinner"
   },
   "strength_routine": "Squat 3×10 | RDL 3×10 | Hip Thrust 3×12",
-  "mobility_routine": "Foam roll 10min + hip mobility"
+  "mobility_routine": "Foam roll 10min + hip mobility",
+  "training_venue": {
+    "_comment": "Optional: treadmill | outdoor per session type — shown as a label in the daily plan.",
+    "easy": "outdoor",
+    "long_e_only": "outdoor",
+    "long_with_m": "outdoor",
+    "quality": "outdoor"
+  },
+  "injury_watch": []
 }

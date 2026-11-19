@@ -7,7 +7,6 @@ Usage:
     python3 daily_brief.py                      # live mode (ดึง Garmin)
     python3 daily_brief.py --offline            # ใช้ cache เท่านั้น (ไม่ต่อ Garmin)
     python3 daily_brief.py --pain mild
-    python3 daily_brief.py --type I             # override quality type
 """
 
 import sys
@@ -246,13 +245,13 @@ def main():
             print(f"   TSB (Form)     : {_tsb:+.1f}  {_lbl}")
             if _tsb_race is not None:
                 _race_icon = "✅" if _tsb_race >= 0 else "🟡"
-                print(f"   คาด TSB แข่ง   : {_tsb_race:+.1f}  {_race_icon}")
+                print(f"   คาด TSB แข่ง   : {_tsb_race:+.1f}  {_race_icon}  (ถ้าพักทุกวันจนถึงวันแข่ง — ค่าบน)")
     except Exception:
         print("   ⚠️  ไม่สามารถคำนวณ PMC ได้")
 
-    # --- Weekly Volume (7-day rolling vs plan target) ---
+    # --- Weekly Volume (Mon–today vs plan target) ---
     print(f"\n{SEP}")
-    print("📊 WEEKLY VOLUME (7-day rolling)")
+    print("📊 WEEKLY VOLUME (จันทร์–วันนี้)")
     try:
         from activity_loader import load_activities_merged
         _km_target   = _wi["km_target"]
@@ -329,8 +328,13 @@ def main():
         for c in _cc:
             print(f"   • {c}")
 
-    if day_type not in ("strength", "rest"):
-        print(f"   💡 ลู่ไฟฟ้า: ปรับ Incline 1.0% เสมอ (จำลองแรงต้านอากาศกลางแจ้ง) — คุมด้วย HR ไม่ใช่ GPS pace")
+    _sp = _s.get("spec") or {}
+    _is_run_today = decision != "REST" and day_type not in ("strength", "rest") and _sp
+    if _is_run_today:
+        if _sp.get("type") in ("T", "I", "R", "M", "combo"):
+            print(f"   💡 ลู่ไฟฟ้า: Incline 1.0% — Quality คุมด้วย pace/ความเร็วสายพาน (HR เป็นเพดานเท่านั้น)")
+        else:
+            print(f"   💡 ลู่ไฟฟ้า: Incline 1.0% — Easy/Long คุมด้วย HR (≤ E ceiling) ไม่ใช่ GPS pace")
         try:
             from bangkok_climate import morning_temp_c_for, ely_penalty_fraction
             _temp = morning_temp_c_for(today)
@@ -344,7 +348,7 @@ def main():
     print(f"\n{SEP}")
     print("💊 NUTRITION")
     print(f"   Pre : {_s.get('nutrition', '-')}")
-    if day_type not in ("rest",):
+    if _is_run_today:
         print(f"   Post: {DAY_NUTRITION['post_run']}")
 
     # --- Taper Monitor ---

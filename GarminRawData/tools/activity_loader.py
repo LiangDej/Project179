@@ -36,13 +36,16 @@ _LIVE_CACHE: dict = {}
 
 
 def _live(limit: int) -> list:
-    if limit not in _LIVE_CACHE:
+    """One Garmin call per process: a cached larger pull serves smaller limits."""
+    have = max(_LIVE_CACHE) if _LIVE_CACHE else 0
+    if have < limit:
         try:
             from garmin_client import get_client, garmin_get
             _LIVE_CACHE[limit] = garmin_get(get_client().get_activities, 0, limit) or []
         except Exception:
-            _LIVE_CACHE[limit] = []   # Garmin unreachable → file-only (graceful)
-    return _LIVE_CACHE[limit]
+            _LIVE_CACHE[limit] = _LIVE_CACHE.get(have, [])   # Garmin unreachable → file-only
+        have = limit
+    return _LIVE_CACHE[have][:limit]
 
 
 def _type(a: dict) -> str:
@@ -80,8 +83,11 @@ def load_cross_training(limit: int = 80, allow_live: bool = True) -> list:
         if any(k not in cross for k in new):
             cross.update(new)
             try:
-                CROSS_FILE.write_text(json.dumps(sorted(cross.values(), key=lambda a: a.get("startTimeLocal", "")),
-                                                 ensure_ascii=False))
+                import os
+                tmp = CROSS_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(sorted(cross.values(), key=lambda a: a.get("startTimeLocal", "")),
+                                          ensure_ascii=False))
+                os.replace(tmp, CROSS_FILE)   # atomic
             except Exception:
                 pass
         else:
@@ -91,4 +97,7 @@ def load_cross_training(limit: int = 80, allow_live: bool = True) -> list:
 
 def load_load_activities(limit: int = 80, allow_live: bool = True) -> list:
     """Runs + cardio cross-training — for training LOAD (PMC/ACWR) only."""
-    return load_activities_merged(limit, allow_live) + load_cross_training(limit, allow_live)
+    merged = {a["activityId"]: a for a in load_activities_merged(limit, allow_live)}
+    for a in load_cross_training(limit, allow_live):
+        merged.setdefault(a["activityId"], a)      # dedupe by activityId
+    return list(merged.values())

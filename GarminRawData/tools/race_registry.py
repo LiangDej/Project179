@@ -31,14 +31,21 @@ from pathlib import Path
 from datetime import date
 
 RACES_FILE = Path(__file__).resolve().parent.parent / "races.json"
+RACES_EXAMPLE = RACES_FILE.with_name("races.example.json")
+
+
+def _read_file() -> Path:
+    """races.json, else races.example.json on a fresh clone (like config.py)."""
+    return RACES_FILE if RACES_FILE.exists() else RACES_EXAMPLE
 
 
 def load_races() -> dict:
     """Return {key: race_dict}. Empty dict if file missing/corrupt."""
-    if not RACES_FILE.exists():
+    src = _read_file()
+    if not src.exists():
         return {}
     try:
-        data = json.loads(RACES_FILE.read_text(encoding="utf-8"))
+        data = json.loads(src.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
     return data.get("races", {})
@@ -46,7 +53,7 @@ def load_races() -> dict:
 
 def _raw() -> dict:
     try:
-        return json.loads(RACES_FILE.read_text(encoding="utf-8"))
+        return json.loads(_read_file().read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 
