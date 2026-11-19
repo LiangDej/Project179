@@ -529,7 +529,9 @@ def main():
             # downgrades tomorrow's plan off a stale, already-spent number.
             bb = cached.get("bb_high") if cached.get("bb_high") is not None else cached.get("body_battery")
         if hrv == "unknown":
-            hrv = cached.get("hrv_status", "unknown").lower()
+            # v1.7.2: last night's HRV vs range, not the lagging 7-day status
+            from hrv_trend import readiness_hrv
+            hrv = readiness_hrv(cached)
 
     plan = generate_week_plan(args.week, bb, hrv, args.pain, args.verbose)
 

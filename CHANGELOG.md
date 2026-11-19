@@ -2,6 +2,20 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [1.7.2] — 2026-11-19
+
+Readiness reads last night's HRV and a rolling RHR baseline instead of two
+lagging/static numbers.
+
+### Fixed
+- **Readiness used Garmin's 7-day HRV status as if it were today's.** `hrv_status` judges the 7-day *average*, so after a race it stays UNBALANCED for days after the body has recovered (2026-11-19: last night 94 ms inside the 85–121 range, weekly avg 79 → "UNBALANCED"). daily_brief downgraded the day and hrv_trend fired "HRV CRASH 3 days" for what was one marathon counted three times. The wellness master now stores last night's HRV + the personal balanced range (`hrv_last_night`, `hrv_weekly_avg`, `hrv_balanced_low/high`); readiness (daily_brief, session_prescriber) and the crash streak use last night vs range, and fall back to the status only when the numbers are missing. The 7-day status is still shown as the trend.
+- **Readiness RHR baseline was athlete.json `rhr` (44).** That value is the Karvonen input for HR zones and sits near the yearly minimum; a normal morning is ~48–50, so ordinary days read "+4/+5". daily_brief and hrv_trend now share `hrv_trend.rhr_baseline()` = median morning RHR of the 28 days before today (today excluded; falls back to athlete.json with <7 nights). HR zones still use athlete.json `rhr` — unchanged.
+- `season_summary` "HRV today" shows last night's value next to the 7-day status.
+
+### Added
+- `GarminRawData/backfill_hrv_nightly.py` — one-off, fills the nightly HRV fields into existing wellness files (run for the last 35 days).
+- 11 test_suite checks (`v172_tests`) — 172 total.
+
 ## [1.7.1] — 2026-11-18
 
 Bug-fix round after v1.7: one session log, taper by race tier, nutrition that

@@ -282,6 +282,9 @@ _HEALTH_KEYS = (
     "sleep_rem_min", "sleep_light_min", "sleep_awake_min",
     "respiratory_avg", "respiratory_low", "respiratory_high",
     "spo2_avg", "spo2_low",
+    # v1.7.2: nightly HRV numbers — hrv_status is Garmin's 7-day-average
+    # verdict and lags recovery by days; readiness needs last night's value.
+    "hrv_last_night", "hrv_weekly_avg", "hrv_balanced_low", "hrv_balanced_high",
 )
 
 
@@ -321,6 +324,18 @@ def _flatten_wellness(master: dict) -> dict:
     return flat
 
 
+def hrv_numbers(summary: dict) -> dict:
+    """Garmin hrvSummary → nightly HRV numbers (ms). Used by the snapshot and
+    by backfill so both store the same fields."""
+    base = (summary or {}).get("baseline") or {}
+    return {
+        "hrv_last_night":    (summary or {}).get("lastNightAvg"),
+        "hrv_weekly_avg":    (summary or {}).get("weeklyAvg"),
+        "hrv_balanced_low":  base.get("balancedLow"),
+        "hrv_balanced_high": base.get("balancedUpper"),
+    }
+
+
 def _extract_wellness_snapshot(client, date_str: str) -> dict:
     """ดึง wellness 1 snapshot จาก Garmin API (get_stats + BB + HRV + Sleep)"""
     snap = {
@@ -331,6 +346,8 @@ def _extract_wellness_snapshot(client, date_str: str) -> dict:
         "sleep_light_min": None, "sleep_awake_min": None,
         "respiratory_avg": None, "respiratory_low": None, "respiratory_high": None,
         "spo2_avg": None, "spo2_low": None,
+        "hrv_last_night": None, "hrv_weekly_avg": None,
+        "hrv_balanced_low": None, "hrv_balanced_high": None,
     }
 
     # Daily stats → resting HR / stress / BB high+low (authoritative nadir)
@@ -361,6 +378,7 @@ def _extract_wellness_snapshot(client, date_str: str) -> dict:
         if hrv:
             summary = hrv.get("hrvSummary", {})
             snap["hrv_status"] = summary.get("status") or hrv.get("hrvStatus")
+            snap.update(hrv_numbers(summary))
     except Exception as e:
         logger.warning(f"HRV fetch failed: {e}")
 

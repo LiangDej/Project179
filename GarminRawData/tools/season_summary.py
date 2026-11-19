@@ -140,7 +140,10 @@ def main():
             bb_avg  = round(sum(bb_recent)/len(bb_recent), 1)   if bb_recent  else None
             bal_pct = round(sum(1 for r in records[-7:] if r.get("hrv_status") == "BALANCED") / 7 * 100)
 
-            print(f"   HRV today     : {last.get('hrv_status','?')}  (BALANCED {bal_pct}% last 7d)")
+            _ln = last.get("hrv_last_night")
+            _night = (f"เมื่อคืน {_ln} ms (ช่วงปกติ {last.get('hrv_balanced_low')}–"
+                      f"{last.get('hrv_balanced_high')}) | ") if _ln is not None else ""
+            print(f"   HRV today     : {_night}7d {last.get('hrv_status','?')}  (BALANCED {bal_pct}% last 7d)")
             print(f"   RHR 7d avg    : {rhr_avg} bpm")
             print(f"   BB overnight  : {bb_avg} (7d avg)")
             print(f"   Crash status  : {crash['emoji']} {crash['headline']}")

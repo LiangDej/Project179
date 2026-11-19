@@ -25,6 +25,7 @@ sys.path.insert(0, str(COACH_MCP))
 from config import (ATHLETE, VDOT_PACES, HR_ZONE_BOUNDS,  # noqa: E402
                     PHASE_PRESCRIPTIONS, get_current_phase)
 from garmin_client import get_client, get_health_cached    # noqa: E402
+from hrv_trend import readiness_hrv, night_hrv_state, rhr_baseline  # noqa: E402
 
 # SINGLE SOURCE: races.json via race_registry (active races only).
 try:
@@ -128,7 +129,7 @@ def readiness_assess(bb, hrv_status, day_type, pain="none", taper_days=None,
     is_q    = day_type in ("quality1", "quality2")
     is_hard = is_q or day_type == "long"
     hrv     = (hrv_status or "unknown").lower()
-    rhr_d   = (rhr - rhr_baseline) if (rhr and rhr_baseline) else None
+    rhr_d   = round(rhr - rhr_baseline, 1) if (rhr and rhr_baseline) else None
     votes   = []   # (decision, cap_km, msg)
 
     if bb is None:
@@ -140,16 +141,16 @@ def readiness_assess(bb, hrv_status, day_type, pain="none", taper_days=None,
                       f"🟡 มีอาการบาดเจ็บ ({pain}) — ลดระดับเป็น Easy Run เท่านั้น"))
     if rhr_d is not None:
         if rhr_d >= RHR_HIGH_DELTA:
-            votes.append(("MODIFY", 6, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d} bpm — "
+            votes.append(("MODIFY", 6, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d:g} bpm — "
                                        "ยังไม่ฟื้น/อาจป่วย: Easy สั้น ≤40 นาที หรือพัก"))
         elif rhr_d >= RHR_WARN_DELTA and is_hard:
-            votes.append(("MODIFY", 8, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d} bpm — ตัด Quality/Long → Easy"))
+            votes.append(("MODIFY", 8, f"🟡 RHR {rhr} สูงกว่า baseline +{rhr_d:g} bpm — ตัด Quality/Long → Easy"))
     if hrv == "unbalanced":
         if bb is not None and bb < 30:
-            votes.append(("REST", 0, "🔴 HRV Unbalanced + BB ต่ำมาก — ร่างกายล้าสะสม พักผ่อน 100%"))
+            votes.append(("REST", 0, "🔴 HRV ต่ำกว่าช่วงปกติ + BB ต่ำมาก — ร่างกายล้าสะสม พักผ่อน 100%"))
         else:
             votes.append(("MODIFY", 8 if is_hard else 6,
-                          "🟡 HRV Unbalanced — ระบบประสาทไม่พร้อม ปรับลดความหนักลง"))
+                          "🟡 HRV เมื่อคืนต่ำกว่าช่วงปกติ — ระบบประสาทไม่พร้อม ปรับลดความหนักลง"))
     if bb is not None:
         if bb < 20:
             votes.append(("REST", 0, "🔴 BB ต่ำมาก — พักผ่อน อย่าฝืน"))
@@ -356,10 +357,20 @@ def main():
     bb_now = health.get("body_battery")
     bb_now_tag = f"  (ตอนนี้ {bb_now})" if bb_now is not None and bb_now != bb else ""
     print(f"   🔋 Body Battery : {bb if bb is not None else 'N/A'} (peak เช้า){bb_now_tag}  {_icon(bb,75,50)}")
-    print(f"   💓 HRV          : {hrv_status}")
-    _rb = ATHLETE.get("rhr")
-    _rd = f"  (baseline {_rb}, {rhr - _rb:+d})" if (rhr and _rb) else ""
-    print(f"   ❤️  Resting HR   : {rhr} bpm{_rd}  {_icon(rhr, _rb + 4, _rb + 7, invert=True)}" if rhr else "   ❤️  Resting HR   : N/A")
+    # v1.7.2: last night's HRV decides today; Garmin's status is the 7-day trend.
+    _hl, _ns = health.get("hrv_last_night"), night_hrv_state(health)
+    if _ns is not None:
+        _hicon = {"BALANCED": "🟢", "LOW": "🔴", "HIGH": "🟡"}[_ns]
+        print(f"   💓 HRV เมื่อคืน : {_hl} ms  (ช่วงปกติ {health.get('hrv_balanced_low')}–"
+              f"{health.get('hrv_balanced_high')})  {_hicon}  ← ใช้ตัดสินวันนี้")
+        print(f"      HRV 7 วัน  : {health.get('hrv_weekly_avg')} ms → {hrv_status}  (แนวโน้ม — ช้ากว่าร่างกายหลายวัน)")
+    else:
+        print(f"   💓 HRV          : {hrv_status}  (7-day status — ไม่มีค่าเมื่อคืน)")
+    # Readiness RHR baseline = 28-day median (hrv_trend.rhr_baseline), not
+    # athlete.json rhr (Karvonen input ~yearly minimum). Fallback when <7 nights.
+    _rb = rhr_baseline(today=today) or ATHLETE.get("rhr")
+    _rd = f"  (baseline {_rb:g}, {rhr - _rb:+g})" if (rhr and _rb) else ""
+    print(f"   ❤️  Resting HR   : {rhr} bpm{_rd}  {_icon(rhr, _rb + 3, _rb + 5, invert=True)}" if rhr else "   ❤️  Resting HR   : N/A")
     sleep_icon = _icon(sleep_score, 80, 60)
     print(f"   😴 Sleep Score  : {sleep_score}/100  {sleep_icon}" if sleep_score else "   😴 Sleep Score  : N/A")
     if stress_avg is not None:
@@ -505,8 +516,8 @@ def main():
         print("   ⚠️  ไม่สามารถตรวจสอบได้")
 
     # --- Training Decision + Plan ---
-    _ra = readiness_assess(bb, hrv_status, day_type, args.pain, taper_days,
-                           rhr=rhr, rhr_baseline=ATHLETE.get("rhr"))
+    _ra = readiness_assess(bb, readiness_hrv(health), day_type, args.pain, taper_days,
+                           rhr=rhr, rhr_baseline=_rb)
     decision, reason = _ra["decision"], _ra["reason"]
     print(f"\n{SEP}")
     print(f"🎯 TODAY'S PLAN{taper_tag}")

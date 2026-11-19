@@ -39,6 +39,72 @@ def load_health(days: int = 90) -> list[dict]:
     return sorted(records, key=lambda x: x["_date"])
 
 
+# ---------------------------------------------------------------------------
+# v1.7.2 — readiness signals (single source for daily_brief / session_prescriber)
+#
+# Garmin's hrv_status is a verdict on the 7-DAY AVERAGE, so after a race it
+# stays UNBALANCED for days after the body has recovered (2026-11-19: last
+# night 94 ms inside 85–121, weekly avg 79 → "UNBALANCED"). Readiness for
+# TODAY uses last night's number; the status stays as the trend signal.
+# ---------------------------------------------------------------------------
+SUPPRESSED = {"LOW", "POOR", "UNBALANCED"}
+RHR_BASELINE_WINDOW = 28   # days before today
+RHR_BASELINE_MIN    = 7    # need this many nights, else caller falls back
+
+
+def night_hrv_state(rec: dict) -> str | None:
+    """Last night's HRV vs Garmin's personal balanced range.
+    → "LOW" (below range) / "BALANCED" / "HIGH" (above) / None (no numbers)."""
+    v, lo, hi = (rec or {}).get("hrv_last_night"), (rec or {}).get("hrv_balanced_low"), \
+                (rec or {}).get("hrv_balanced_high")
+    if v is None or lo is None or hi is None:
+        return None
+    return "LOW" if v < lo else ("HIGH" if v > hi else "BALANCED")
+
+
+def is_suppressed(rec: dict) -> bool:
+    """Night counts as suppressed: last-night HRV below range; only when the
+    numbers are missing (older records) fall back to the 7-day status."""
+    st = night_hrv_state(rec)
+    if st is not None:
+        return st == "LOW"
+    return (rec or {}).get("hrv_status", "") in SUPPRESSED
+
+
+def readiness_hrv(rec: dict) -> str:
+    """HRV label for readiness rules (lower-case, daily_brief vocabulary):
+    'balanced' / 'unbalanced' (last night below range) / 'high' (above range),
+    or the 7-day status when last night's numbers are missing."""
+    st = night_hrv_state(rec)
+    if st == "BALANCED":
+        return "balanced"
+    if st == "LOW":
+        return "unbalanced"
+    if st == "HIGH":
+        return "high"
+    return ((rec or {}).get("hrv_status") or "unknown").lower()
+
+
+def rhr_baseline(records: list[dict] | None = None, today: date | None = None,
+                 window: int = RHR_BASELINE_WINDOW) -> float | None:
+    """Readiness RHR baseline = median morning RHR of the `window` days BEFORE
+    today (today excluded so a bad night can't hide itself). None when fewer
+    than RHR_BASELINE_MIN nights — caller falls back to athlete.json rhr.
+
+    athlete.json "rhr" (44, near the yearly minimum) stays the Karvonen input
+    for HR zones; it is NOT a typical morning (median ~48–50), so using it for
+    readiness flagged normal mornings as +4/+5."""
+    today = today or date.today()
+    if records is None:
+        records = load_health(window + 1)
+    vals = sorted(r["resting_hr"] for r in records
+                  if r.get("resting_hr") and today - timedelta(days=window) <= r["_date"] < today)
+    if len(vals) < RHR_BASELINE_MIN:
+        return None
+    n = len(vals)
+    return float(vals[n // 2]) if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
+
+
 def rolling_avg(vals: list[float], n: int) -> list[float | None]:
     result = []
     for i in range(len(vals)):
@@ -50,14 +116,14 @@ def rolling_avg(vals: list[float], n: int) -> list[float | None]:
 def crash_report(records: list[dict]) -> dict:
     """
     HRV crash detector — returns severity + actionable prescription.
-    Crash = 3+ consecutive days with HRV status NOT BALANCED.
+    Crash = 3+ consecutive nights with last-night HRV below the balanced
+    range (v1.7.2; was 7-day status, which counted one race 3–5 times).
     """
-    SUPPRESSED = {"LOW", "POOR", "UNBALANCED"}
 
     # Count current streak of suppressed HRV (most recent first)
     streak = 0
     for r in reversed(records):
-        if r.get("hrv_status", "") in SUPPRESSED:
+        if is_suppressed(r):
             streak += 1
         else:
             break
@@ -66,7 +132,7 @@ def crash_report(records: list[dict]) -> dict:
     max_streak = 0
     cur = 0
     for r in records:
-        if r.get("hrv_status", "") in SUPPRESSED:
+        if is_suppressed(r):
             cur += 1
             max_streak = max(max_streak, cur)
         else:
@@ -76,12 +142,12 @@ def crash_report(records: list[dict]) -> dict:
     if streak == 0:
         severity   = "none"
         emoji      = "✅"
-        headline   = "HRV ปกติ — ไม่มีสัญญาณ crash"
+        headline   = "HRV เมื่อคืนอยู่ในช่วงปกติ — ไม่มีสัญญาณ crash"
         advice     = []
     elif streak < 3:
         severity   = "watch"
         emoji      = "🟡"
-        headline   = f"HRV suppressed {streak} วันติด — watch mode"
+        headline   = f"HRV เมื่อคืนต่ำกว่าช่วงปกติ {streak} คืนติด — watch mode"
         advice     = [
             "ลด intensity ลง 20% หากซ้อม quality",
             "นอนก่อน 22:00 คืนนี้",
@@ -90,7 +156,7 @@ def crash_report(records: list[dict]) -> dict:
     elif streak < 5:
         severity   = "crash"
         emoji      = "🔴"
-        headline   = f"HRV CRASH — {streak} วันติด suppressed"
+        headline   = f"HRV CRASH — เมื่อคืนต่ำกว่าช่วงปกติ {streak} คืนติด"
         advice     = [
             "ยกเลิก Quality session ทั้งหมดจนกว่า HRV กลับ BALANCED",
             "วิ่ง Easy ≤ 6km HR < 140 หรือพักเต็ม วันเว้นวัน",
@@ -100,7 +166,7 @@ def crash_report(records: list[dict]) -> dict:
     else:
         severity   = "overreach"
         emoji      = "🚨"
-        headline   = f"OVERREACHING ALARM — {streak} วันติด suppressed (>5 วัน)"
+        headline   = f"OVERREACHING ALARM — HRV ต่ำกว่าช่วงปกติ {streak} คืนติด (>5)"
         advice     = [
             "หยุดซ้อม 3–5 วัน recovery block ทันที",
             "Easy walk หรือ yoga เท่านั้น — ห้ามวิ่ง",
@@ -116,6 +182,9 @@ def crash_report(records: list[dict]) -> dict:
         "headline":    headline,
         "advice":      advice,
     }
+
+
+rhr_baseline_fn = rhr_baseline   # main() shadows the name with a local
 
 
 def main():
@@ -145,7 +214,7 @@ def main():
     hrv_scores_clean = [s for s in hrv_scores if s is not None]
     bb_highs = [r.get("bb_high") for r in records if r.get("bb_high")]
 
-    rhr_baseline = round(sum(rhrs)/len(rhrs), 1) if rhrs else None
+    rhr_baseline = rhr_baseline_fn()   # own 28-day window, independent of --days
     rhr_recent7  = [r.get("resting_hr") for r in records[-7:] if r.get("resting_hr")]
     rhr_recent7_avg = round(sum(rhr_recent7)/len(rhr_recent7), 1) if rhr_recent7 else None
 
@@ -153,7 +222,7 @@ def main():
     hrv_pct = round(balanced_count / len(records) * 100, 1) if records else 0
 
     print(f"📊 Baselines ({args.days}d):")
-    print(f"   RHR baseline       : {rhr_baseline} bpm")
+    print(f"   RHR baseline       : {rhr_baseline} bpm  (median {RHR_BASELINE_WINDOW} วันก่อนวันนี้ — ใช้ตัวเดียวกับ daily_brief)")
     print(f"   RHR last 7d avg    : {rhr_recent7_avg} bpm  "
           f"{'⚠️ +' + str(round(rhr_recent7_avg - rhr_baseline, 1)) + ' vs baseline' if rhr_recent7_avg and rhr_baseline and rhr_recent7_avg > rhr_baseline + 2 else '✅'}")
     print(f"   HRV BALANCED rate  : {hrv_pct}%  "
@@ -171,7 +240,7 @@ def main():
     last14 = records[-14:]
     unbalanced_streak = 0
     for r in reversed(last14):
-        if r.get("hrv_status") in ("LOW", "POOR", "UNBALANCED"):
+        if is_suppressed(r):
             unbalanced_streak += 1
         else:
             break
@@ -182,7 +251,7 @@ def main():
 
     warn_flags = []
     if unbalanced_streak >= 3:
-        warn_flags.append(f"🔴 HRV unbalanced {unbalanced_streak} วันติด → overreaching signal")
+        warn_flags.append(f"🔴 HRV เมื่อคืนต่ำกว่าช่วงปกติ {unbalanced_streak} คืนติด → overreaching signal")
     if rhr_elevated_days >= 5:
         warn_flags.append(f"🔴 RHR สูงกว่า baseline 14 วัน ({rhr_elevated_days}/14 วัน) → systemic fatigue")
     if rhr_recent7_avg and rhr_baseline and rhr_recent7_avg > rhr_baseline + 4:
@@ -238,15 +307,19 @@ def main():
     # Daily log (last 21 days)
     # ---------------------------------------------------------------------------
     print(f"📋 Daily Log (21 วันล่าสุด):")
-    print(f"   {'Date':<12} {'HRV':<12} {'RHR':>5} {'BB↑':>5} {'Sleep':>6}")
-    print("   " + "-" * 44)
+    print(f"   {'Date':<12} {'HRV 7d':<12} {'คืนนั้น':>8} {'ช่วงปกติ':>9} {'RHR':>5} {'BB↑':>5} {'Sleep':>6}")
+    print("   " + "-" * 64)
     for r in records[-21:]:
         hrv = r.get("hrv_status") or "?"
         emoji = HRV_EMOJI.get(hrv, "❓")
         rhr = str(r.get("resting_hr") if r.get("resting_hr") is not None else "?")
         bb = str(r.get("bb_high") if r.get("bb_high") is not None else "?")
         sleep = str(r.get("sleep_score") if r.get("sleep_score") is not None else "?")
-        print(f"   {str(r['_date']):<12} {emoji}{hrv:<11} {rhr:>5} {bb:>5} {sleep:>6}")
+        ln = r.get("hrv_last_night")
+        ns = night_hrv_state(r)
+        ln_s = f"{ln}{'🟢' if ns == 'BALANCED' else '🔴' if ns == 'LOW' else '🟡'}" if ln is not None else "?"
+        rng = f"{r.get('hrv_balanced_low')}–{r.get('hrv_balanced_high')}" if r.get("hrv_balanced_low") else "?"
+        print(f"   {str(r['_date']):<12} {emoji}{hrv:<11} {ln_s:>8} {rng:>9} {rhr:>5} {bb:>5} {sleep:>6}")
     print("=" * 60)
 
 

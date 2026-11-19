@@ -750,6 +750,56 @@ def v171_tests():
           "analyze_week" in (_tools / "season_summary.py").read_text())
 
 
+def v172_tests():
+    """v1.7.2 — readiness uses last night's HRV + a rolling RHR baseline."""
+    print("\n── v1.7.2: nightly HRV + rolling RHR baseline ──")
+    from datetime import date as _d, timedelta as _td
+    import hrv_trend as ht
+    import daily_brief as db
+    import garmin_client as gc
+    rng = {"hrv_balanced_low": 85, "hrv_balanced_high": 121}
+    ok_night  = {**rng, "hrv_last_night": 94, "hrv_status": "UNBALANCED"}
+    low_night = {**rng, "hrv_last_night": 80, "hrv_status": "BALANCED"}
+    check("hrv: last night inside range beats a lagging UNBALANCED 7-day status",
+          ht.readiness_hrv(ok_night) == "balanced" and not ht.is_suppressed(ok_night))
+    check("hrv: last night below range is suppressed even if 7-day says BALANCED",
+          ht.readiness_hrv(low_night) == "unbalanced" and ht.is_suppressed(low_night))
+    check("hrv: above range → 'high' (no MODIFY vote, still blocks quality)",
+          ht.readiness_hrv({**rng, "hrv_last_night": 130}) == "high"
+          and db.readiness_assess(80, "high", "easy")["decision"] == "GO"
+          and db.readiness_assess(80, "high", "quality1")["decision"] == "MODIFY")
+    check("hrv: no nightly numbers → falls back to 7-day status",
+          ht.readiness_hrv({"hrv_status": "UNBALANCED"}) == "unbalanced"
+          and ht.is_suppressed({"hrv_status": "UNBALANCED"}))
+    # post-race: 7-day status red for 3 days but last night recovered → no crash
+    recs = [{**rng, "hrv_last_night": v, "hrv_status": "UNBALANCED"} for v in (80, 83, 94)]
+    check("hrv: crash streak counts nights, one race no longer = 3-day crash",
+          ht.crash_report(recs)["streak"] == 0)
+    check("hrv: 3 low nights in a row is still a crash",
+          ht.crash_report([low_night] * 3)["severity"] == "crash")
+    check("hrv: garmin_client stores nightly numbers in the wellness master",
+          {"hrv_last_night", "hrv_balanced_low", "hrv_balanced_high"} <= set(gc._HEALTH_KEYS)
+          and gc.hrv_numbers({"lastNightAvg": 94, "weeklyAvg": 79,
+                              "baseline": {"balancedLow": 85, "balancedUpper": 121}})
+          == {"hrv_last_night": 94, "hrv_weekly_avg": 79,
+              "hrv_balanced_low": 85, "hrv_balanced_high": 121})
+
+    t = _d(2026, 11, 19)
+    mk = lambda i, r: {"_date": t - _td(days=i), "resting_hr": r}
+    recs = [mk(i, 48 + (i % 3)) for i in range(1, 29)] + [mk(0, 60)]
+    b = ht.rhr_baseline(recs, today=t)
+    check("rhr: baseline = median of the 28 days before today (today excluded)",
+          b == 49.0, str(b))
+    check("rhr: <7 nights → None (caller falls back to athlete.json)",
+          ht.rhr_baseline([mk(i, 50) for i in range(1, 5)], today=t) is None)
+    src = (Path(db.__file__)).read_text()
+    check("rhr: daily_brief readiness uses rolling baseline, not athlete.json rhr",
+          'rhr_baseline=ATHLETE.get("rhr")' not in src and "rhr_baseline(today=today)" in src)
+    check("hrv: daily_brief + session_prescriber decide on readiness_hrv",
+          "readiness_hrv(health)" in src
+          and "readiness_hrv(cached)" in (Path(db.__file__).parent / "session_prescriber.py").read_text())
+
+
 def main():
     _require_athlete_data()
     print("=" * 60)
@@ -780,6 +830,7 @@ def main():
     # 8. Plausibility (outputs make physiological sense)
     plausibility_tests()
     v171_tests()
+    v172_tests()
 
     passed = sum(1 for _, ok, _ in _RESULTS if ok)
     total  = len(_RESULTS)
