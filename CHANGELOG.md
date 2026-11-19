@@ -2,6 +2,11 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [Unreleased]
+
+### Added
+- `GarminRawData/fetch_partner_wellness.py` — raw wellness fetch (BB/HRV/RHR/sleep/stress) for a second Garmin account, fully separate from the athlete pipeline: own creds file (`~/.config/garmin-coach/.env.partner`), own tokenstore, output to gitignored `wellness_partner/`. No coaching logic.
+
 ## [1.7.2] — 2026-11-19
 
 Readiness reads last night's HRV and a rolling RHR baseline instead of two
