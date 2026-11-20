@@ -2,6 +2,11 @@
 
 รูปแบบอิง [Keep a Changelog](https://keepachangelog.com/) — เรียงจากใหม่ไปเก่า ทุกเวอร์ชันมี git tag คู่กัน (`git tag -l`)
 
+## [1.8.2] — 2026-11-20
+
+### Changed
+- **2027 marathon long-run plan aligned with the JD cap (athlete's choice 2026-11-19: keep JD, no longer-than-150-min long runs).** The plan data (`training_plan.json`, local/gitignored; `training_plan.example.json` unchanged) previously asked for 30–32 km long runs that `jd_rules` silently clamped to ~23 km (150 min at E pace, VDOT 40), so the plan displayed numbers that never happened. Now the spec states what is actually run: Marathon Build 20→23 km with the last 8 km @ M (was 5); Race Specific 23 km with the last 11 km @ M (was 8) — within JD's M limits (≤½ of the run, ≤20 % of a 60 km week). Rationale: for a sub-4 target, more marathon-pace volume inside a JD-legal long run is more race-specific than a slow 32 km, and lower risk for the right knee. Base-phase long peak 24→22 km (no real effect — already capped by the 30 %-of-week rule). No tool code changed.
+
 ## [1.8.1] — 2026-11-19
 
 Fixes from a full architectural review of v1.8 (all findings reproduced live
